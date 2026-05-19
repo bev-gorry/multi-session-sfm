@@ -1,0 +1,18 @@
+%YAML 1.2
+---
+
+exp_name: sesoko
+dataset: SESOKO
+subset: sskall-s03
+
+# VPR-LAB
+log_dir: "/media/beverley/beverley_t7/SANGOHENKA-BENCHMARK/SESOKO/sskall-s03"
+
+rgb_folder_db: "/media/beverley/beverley_t7/SANGOHENKA-BENCHMARK/SESOKO/sskall-s03/rgb_0"
+rgb_folder_q: "/media/beverley/beverley_t7/SANGOHENKA-BENCHMARK/SESOKO/sskall-s03/rgb_0"
+
+rgb_list_db: "/media/beverley/beverley_t7/SANGOHENKA-BENCHMARK/SESOKO/sskall-s03/rgb.csv"
+rgb_list_q: "/media/beverley/beverley_t7/SANGOHENKA-BENCHMARK/SESOKO/sskall-s03/rgb.csv"
+
+gt_file_db: "/media/beverley/beverley_t7/SANGOHENKA-BENCHMARK/SESOKO/sskall-s03/groundtruth.csv"
+gt_file_q: "/media/beverley/beverley_t7/SANGOHENKA-BENCHMARK/SESOKO/sskall-s03/groundtruth.csv"

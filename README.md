@@ -19,3 +19,21 @@
     | <a href="https://arxiv.org/abs/2602.20584" align="center">arXiv</a>
     <!-- | <a href="https://underloc.github.io/" align="center"> Project Page</a> -->
   </p>
+
+This repository contains code for the paper "Long-Term Multi-Session 3D Reconstruction Under Substantial Appearance Change."
+
+## Getting Started
+
+We use the package management tool [**pixi**](https://pixi.sh/latest/). If you haven't installed [**pixi**](https://pixi.sh/latest/) yet, run the following command in your terminal:
+
+```bash
+curl -fsSL https://pixi.sh/install.sh | bash
+```
+
+_After installation, restart your terminal or source your shell for the changes to take effect_. For more details, refer to the [**pixi documentation**](https://pixi.sh/latest/).
+
+Clone the repository and navigate to the project directory:
+
+```bash
+git clone https://github.com/bev-gorry/multi-session-sfm.git && cd multi-session-sfm
+```

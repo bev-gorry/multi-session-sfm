@@ -6,13 +6,50 @@ platforms = ["linux-64"]
 version = "0.1.0"
 
 [tasks]
+git-clone-lightglue.cmd = "./git-clone.sh cvg LightGlue baselines"
+install-lightglue = {cmd = 'python -m pip install -e .', cwd = 'baselines/LightGlue', depends-on = ['git-clone-lightglue']}
 
 [environments]
 vslamlab = { features = ["vslamlab"]}
+vprlab = { features = ["vprlab"]}
+
+[dependencies]
+python = "*"
+opencv = "*"
+matplotlib = "*"
+pyyaml = "*"
+pandas = "*"
+seaborn = "*"
+tqdm = "*"
+pytorch-gpu = "*"
+torchvision = ">=0.3"
+
+[system-requirements]
+cuda = "12.0"
 
 [feature.vslamlab]
 channels = ["https://prefix.dev/conda-forge"]
 platforms = ["linux-64"]
 
 [feature.vslamlab.tasks]
-git-clone = {cmd = "./git-clone.sh bev-gorry VSLAM-LAB baselines"}
+git-clone.cmd = "./git-clone.sh bev-gorry VSLAM-LAB baselines"
+
+[feature.vprlab]
+channels = ["https://prefix.dev/conda-forge"]
+platforms = ["linux-64"]
+
+[feature.vprlab.tasks]
+git-clone-vpr-methods.cmd = "./git-clone.sh alejandrofontan VPR-methods-evaluation baselines"
+vpr-lab.cmd = "python vpr-lab.py --method={{ method }} --exp_yaml={{ exp_yaml }} --rot_360"
+vpr-lab.cwd = "baselines/VPR-methods-evaluation"
+vpr-lab.args = [
+  { "arg" = "method", "default" = "megaloc" },
+  { "arg" = "exp_yaml", "default" = "../../arguments/exp_sesoko_sskall-s03.yaml" },
+]
+
+[feature.vprlab.dependencies]
+python="3.11.*"
+faiss-cpu = "=1.8.0"
+gdown = "*"
+scikit-image = "*"
+scikit-learn = "=1.6.1"
