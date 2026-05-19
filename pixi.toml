@@ -7,7 +7,12 @@ version = "0.1.0"
 
 [tasks]
 git-clone-lightglue.cmd = "./git-clone.sh cvg LightGlue baselines"
-install-lightglue = {cmd = 'python -m pip install -e .', cwd = 'baselines/LightGlue', depends-on = ['git-clone-lightglue']}
+install-lightglue = {cmd = "python -m pip install -e .", cwd = "baselines/LightGlue", depends-on = ["git-clone-lightglue"]}
+# clean-distance-matrix.cmd = "python clean_distance_matrix.py --exp_yaml={{ exp_yaml }}"
+# clean-distance-matrix.cwd = "utilities"
+# clean-distance-matrix.args = [
+#   { "arg" = "exp_yaml", "default" = "arguments/exp_test.yaml" },
+# ]
 
 [environments]
 vslamlab = { features = ["vslamlab"]}
@@ -44,7 +49,7 @@ vpr-lab.cmd = "python vpr-lab.py --method={{ method }} --exp_yaml={{ exp_yaml }}
 vpr-lab.cwd = "baselines/VPR-methods-evaluation"
 vpr-lab.args = [
   { "arg" = "method", "default" = "megaloc" },
-  { "arg" = "exp_yaml", "default" = "../../arguments/exp_sesoko_sskall-s03.yaml" },
+  { "arg" = "exp_yaml", "default" = "../../arguments/exp_test.yaml" },
 ]
 
 [feature.vprlab.dependencies]

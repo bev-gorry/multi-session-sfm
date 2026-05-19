@@ -16,3 +16,6 @@ rgb_list_q: "/media/beverley/beverley_t7/SANGOHENKA-BENCHMARK/SESOKO/sskall-s03/
 
 gt_file_db: "/media/beverley/beverley_t7/SANGOHENKA-BENCHMARK/SESOKO/sskall-s03/groundtruth.csv"
 gt_file_q: "/media/beverley/beverley_t7/SANGOHENKA-BENCHMARK/SESOKO/sskall-s03/groundtruth.csv"
+
+# DISTANCE MATRIX
+dist_threshold: 0.6
