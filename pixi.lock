@@ -1,0 +1,18 @@
+version: 6
+environments:
+  default:
+    channels:
+    - url: https://conda.anaconda.org/conda-forge/
+    - url: https://conda.anaconda.org/nvidia/label/cuda-12.0.0/
+    options:
+      pypi-prerelease-mode: if-necessary-or-explicit
+    packages: {}
+  vslamlab:
+    channels:
+    - url: https://prefix.dev/conda-forge/
+    - url: https://conda.anaconda.org/conda-forge/
+    - url: https://conda.anaconda.org/nvidia/label/cuda-12.0.0/
+    options:
+      pypi-prerelease-mode: if-necessary-or-explicit
+    packages: {}
+packages: []
