@@ -37,3 +37,32 @@ Clone the repository and navigate to the project directory:
 ```bash
 git clone https://github.com/bev-gorry/multi-session-sfm.git && cd multi-session-sfm
 ```
+
+## Setup
+Clone VSLAM-LAB and VPR-LAB:
+```bash
+pixi run -e vslamlab git-clone
+pixi run -e vprlab git-clone-vpr-methods
+```
+
+Clone and setup LightGlue:
+```bash
+pixi run git-clone-lightglue
+pixi run install-lightglue
+```
+
+## VPR-Lab and Distance Matrix Filtering
+Compute a distance matrix **D.npy** from a combined 'all' subset:
+```bash
+pixi run -e vprlab vpr-lab
+```
+
+Clean the distance matrix by setting diagonal values and same-sequence values to inf. Then apply the distance threshold which must be specified in your experiment yaml file.
+```bash
+pixi run scripts/clean_distance_matrix.py
+pixi run python scripts/apply_distance_threshold.py
+```
+WIP: This may change to include the threshold as a command rather than specifying it in the experiment yaml. We may also standardize the output: **D_brinary_0.6.npy** -> **D_binary.npy**.
+```bash
+pixi run python scripts/apply_distance_threshold.py --threshold=0.6
+```
