@@ -54,7 +54,8 @@ def main():
     print(f"Estimated time for feature matching: {total_time_minutes:.2f} hours")
     
     # Save binary matrix
-    np.save(f"{Path(matrix_path).parent}/D_binary_{dist_thresh}.npy", D_binary)
+    # np.save(f"{Path(matrix_path).parent}/D_binary_{dist_thresh}.npy", D_binary)
+    np.save(f"{Path(matrix_path).parent}/D_binary.npy", D_binary)
 
     # Visualize matrix
     fig_main, ax_main = plt.subplots(figsize=(8, 6))
