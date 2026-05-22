@@ -19,7 +19,7 @@ def main():
     
     args = parser.parse_args()
     
-    _, _, log_dir, dist_thresh = parse_yaml(args.exp_yaml)
+    _, _, _, log_dir, dist_thresh = parse_yaml(args.exp_yaml)
     matrix_path = f"{log_dir}/D_cleaned.npy"
 
     # dist_thresh = args.threshold

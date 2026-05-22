@@ -19,7 +19,7 @@ def main():
 
     args = parser.parse_args()
     
-    _, _, log_dir, _ = parse_yaml(args.exp_yaml)
+    _, _, _, log_dir, _ = parse_yaml(args.exp_yaml)
     matrix_path = f"{log_dir}/D.npy"
     rgb_csv = f"{log_dir}/rgb.csv"
     
