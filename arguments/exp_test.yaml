@@ -1,7 +1,7 @@
 %YAML 1.2
 ---
 
-exp_name: sesoko
+exp_name: exp_sesoko_sskall_s03
 dataset: SESOKO
 subset: sskall-s03
 

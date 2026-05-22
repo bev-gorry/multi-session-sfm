@@ -50,11 +50,17 @@ pixi run -e vprlab git-clone-vpr-methods
 **IMPORTANT:** Clone and install Lightglue in VSLAM-LAB
 
 ```bash
-cd baselines/VSLAM-Lab
+cd baselines/VSLAM_LAB
 pixi run -e lightglue install
 ```
 
-NOTE: Please update the following variables in _VSLAM-LAB/path_constants.py_
+<!-- Optionally, clone colmap and glomap (VSLAM-LAB will do this automatically).
+```bash
+pixi run -e colmap git-clone
+pixi run -e glomap git-clone
+``` -->
+
+NOTE: Please update the following variables in _VSLAM_LAB/path_constants.py_
 
 ```
 HUGGINGFACE_TOKEN
@@ -80,19 +86,19 @@ pixi run -e vprlab vpr-lab
 Clean the distance matrix by setting diagonal values and same-sequence values to inf. Then apply the distance threshold which must be specified in your experiment yaml file.
 
 ```bash
-pixi run python scripts/clean_distance_matrix.py
-pixi run python scripts/apply_distance_threshold.py
+pixi run python scripts/clean_distance_matrix.py --exp_yaml=arguments/exp_test.yaml
+pixi run python scripts/apply_distance_threshold.py --exp_yaml=arguments/exp_test.yaml
 ```
 
-WIP: This may change to include the threshold as a command rather than specifying it in the experiment yaml. We may also standardize the output: **D_brinary_0.6.npy** -> **D_binary.npy**.
+<!-- WIP: This may change to include the threshold as a command rather than specifying it in the experiment yaml. We may also standardize the output: **D_brinary_0.6.npy** -> **D_binary.npy**.
 
 ```bash
 pixi run python scripts/apply_distance_threshold.py --threshold=0.6
-```
+``` -->
 
 ## VSLAM-LAB
 
-Create an experiment yaml file (specific to your VSLAM-Lab exp) and ensure that it points to the correct config file in VSLAM-Lab. Ensure that these variables in _VSLAM-LAB/path_constants.py_ are correct according to your own benchmark containing the distance matrix: VSLAMLAB_BENCHMARK, VSLAMLAB_EVALUATION. Run VSLAM-Lab:
+Create an experiment yaml file (specific to your VSLAM-Lab exp) and ensure that it points to the correct config file in VSLAM-Lab. Ensure that these variables in _VSLAM_LAB/path_constants.py_ are correct according to your own benchmark containing the distance matrix: VSLAMLAB_BENCHMARK, VSLAMLAB_EVALUATION. Run VSLAM-Lab:
 
 ```bash
 pixi run vslamlab

@@ -33,9 +33,9 @@ channels = ["https://prefix.dev/conda-forge"]
 platforms = ["linux-64"]
 
 [feature.vslamlab.tasks]
-git-clone.cmd = "./git-clone.sh bev-gorry VSLAM-LAB baselines"
+git-clone.cmd = "./git-clone.sh bev-gorry VSLAM-LAB baselines && mv baselines/VSLAM-LAB baselines/VSLAM_LAB"
 vslamlab.cmd = "python vslamlab_gui.py vslamlab {{ exp_yaml }} {{ overwrite }}"
-vslamlab.cwd = "baselines/VSLAM-LAB"
+vslamlab.cwd = "baselines/VSLAM_LAB"
 vslamlab.args = [
   { "arg" = "exp_yaml", "default" = "../../arguments/exp_test_vslamlab.yaml" },
   { "arg" = "overwrite", "default" = " " },
