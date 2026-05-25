@@ -10,7 +10,7 @@ from pathlib import Path
 root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 sys.path.append(root)
 
-from utilities.parse_yaml import parse_yaml
+from utilities import parse_yaml
 
 def main():
     parser = argparse.ArgumentParser(description="Count pairs below threshold in a distance matrix.")

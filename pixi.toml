@@ -6,12 +6,12 @@ platforms = ["linux-64"]
 version = "0.1.0"
 
 [tasks]
-git-clone-lightglue.cmd = "./git-clone.sh cvg LightGlue baselines"
-install-lightglue = {cmd = "python -m pip install -e .", cwd = "baselines/LightGlue", depends-on = ["git-clone-lightglue"]}
+
 
 [environments]
 vslamlab = { features = ["vslamlab"]}
 vprlab = { features = ["vprlab"]}
+lightglue = { features = ["lightglue"]}
 
 [dependencies]
 python = "*"
@@ -91,3 +91,26 @@ faiss-cpu = "=1.8.0"
 gdown = "*"
 scikit-image = "*"
 scikit-learn = "=1.6.1"
+
+##### LightGlue #####
+[feature.lightglue]
+channels = ["https://prefix.dev/conda-forge"]
+platforms = ["linux-64"]
+
+[feature.lightglue.tasks]
+git-clone.cmd = "./git-clone.sh cvg LightGlue baselines"
+install = {cmd = "python -m pip install -e .", cwd = "baselines/LightGlue", depends-on = ["git-clone-lightglue"]}
+
+[feature.lightglue.dependencies]
+python = "*"
+opencv = "*"
+matplotlib = "*"
+pyyaml = "*"
+pandas = "*"
+seaborn = "*"
+tqdm = "*"
+pytorch-gpu = "*"
+torchvision = ">=0.3"
+kornia = ">=0.6.11"
+open3d = ">=0.19.0"
+transforms3d = ">=0.4.2,<0.5"
