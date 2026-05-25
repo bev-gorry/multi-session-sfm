@@ -104,9 +104,20 @@ Create an experiment yaml file (specific to your VSLAM-Lab exp) and ensure that 
 pixi run vslamlab
 ```
 
-## COMING NEXT
+## Coloring Pointclouds
+Color each point in a pointcloud according to the year in which it is observed. This changes depending on the dataset.
 
-Evaluation scripts and visualizations.
+```bash
+pixi run python vis/color_pointcloud_sesoko.py
+```
+
+## Evaluation
+
+Populate your own csv files with image pairs for evaluation, following the format provided.
+* **select_eval_points.py:** The script will show the image pairs and clickable keypoints on the query image. User-clicked keypoints are projected onto the database image, where users can click on a projected point to move and correct its position. Must be run under the *lightglue* environment.
+* **project_eval_points.py:** Iterates over the image pairs in the csv file and projects query keypoints onto the database image. Projections are compared against uv_groundtruth (in the csv files) and reprojection error is measured. A *.npy* file is produced for each csv file, corresponding to a session combination.
+* **compute_rpe_from_projected_points.py:** Concatenates reprojection errors from each session combination into one *.npy* file. Also computes the mean and median rpe.
+* **plot_rpe.py:** Created a plot of median reprojection error for each method across the experiment subset. Inset shows a cropped plot of the top *x%*.
 
 ## Included Repositories
 
