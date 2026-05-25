@@ -14,10 +14,8 @@ from pathlib import Path
 root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 sys.path.append(root)
 
-from utilities.parse_yaml import parse_yaml
-
+from utilities import parse_yaml
 from baselines.VSLAM_LAB.path_constants import VSLAMLAB_BENCHMARK, VSLAMLAB_EVALUATION
-
 from baselines.VSLAM_LAB.Baselines.colmap.scripts.python.read_write_model import read_model, write_model
 
 
@@ -49,7 +47,6 @@ if __name__ == "__main__":
     alpha_tint = 0.4
     
     # subsets = ["s01", "s02", "s03", "s04"]
-    # subsets = ["s30"]
     # for subset in subsets:
         
     model_path = Path(f'{VSLAMLAB_EVALUATION}/{exp_name}/{dataset}/{subset}/colmap_00000/0')
