@@ -69,7 +69,7 @@ if __name__ == "__main__":
     
     METHOD = "OURS"   # 'ours' or 'colmap' or 'icp' or 'buffer' or 'vpr' or 'seq'
     
-    parser = argparse.ArgumentParser(description="Count pairs below threshold in a distance matrix.")
+    parser = argparse.ArgumentParser(description="")
     parser.add_argument("--exp_yaml", type=str, default="arguments/exp_test.yaml", help="Path to experiment YAML file.")
     
     args = parser.parse_args()

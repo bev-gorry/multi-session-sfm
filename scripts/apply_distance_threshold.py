@@ -13,7 +13,7 @@ sys.path.append(root)
 from utilities import parse_yaml
 
 def main():
-    parser = argparse.ArgumentParser(description="Count pairs below threshold in a distance matrix.")
+    parser = argparse.ArgumentParser(description="")
     parser.add_argument("--exp_yaml", type=str, default="arguments/exp_test.yaml", help="Path to experiment YAML file.")
     # parser.add_argument("--threshold", type=float, help="Threshold between 0 and 1")
     
