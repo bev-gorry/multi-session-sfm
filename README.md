@@ -75,19 +75,27 @@ pixi run install-lightglue
 
 <!-- NTS: Somewhere here I will also need to install colmap and glomap and make the VPR changes which are not on huggingface. -->
 
+## IMPORTANT: Experiment Setup
+Ensure that the necessary datasets and sequences are downloaded in VSLAM-LAB format **before** computing the distance matrix.
+```bash
+cd baselines/VSLAM_LAB
+pixi run get-experiment-resources ../../arguments/exp_test_vslamlab.yaml
+cd ../..
+```
+
 ## VPR-LAB and Distance Matrix Filtering
 
-Compute a distance matrix **D.npy** from a combined 'all' subset:
+Compute a distance matrix **D.npy** from a combined 'all' subset. List the VPR method and argument yaml file in succession.
 
 ```bash
-pixi run -e vprlab vpr-lab
+pixi run -e vprlab vpr-lab megaloc ../../arguments/exp_test.yaml
 ```
 
 Clean the distance matrix by setting diagonal values and same-sequence values to inf. Then apply the distance threshold which must be specified in your experiment yaml file.
 
 ```bash
-pixi run python scripts/clean_distance_matrix.py --exp_yaml=arguments/exp_test.yaml
-pixi run python scripts/apply_distance_threshold.py --exp_yaml=arguments/exp_test.yaml
+pixi run -e lightglue python scripts/clean_distance_matrix.py --exp_yaml=arguments/exp_test.yaml
+pixi run -e lightglue python scripts/apply_distance_threshold.py --exp_yaml=arguments/exp_test.yaml
 ```
 
 <!-- WIP: This may change to include the threshold as a command rather than specifying it in the experiment yaml. We may also standardize the output: **D_brinary_0.6.npy** -> **D_binary.npy**.
@@ -101,7 +109,7 @@ pixi run python scripts/apply_distance_threshold.py --threshold=0.6
 Create an experiment yaml file (specific to your VSLAM-Lab exp) and ensure that it points to the correct config file in VSLAM-Lab. Ensure that these variables in _VSLAM_LAB/path_constants.py_ are correct according to your own benchmark containing the distance matrix: VSLAMLAB_BENCHMARK, VSLAMLAB_EVALUATION. Run VSLAM-Lab:
 
 ```bash
-pixi run vslamlab
+pixi run -e vslamlab vslamlab ../../arguments/exp_test_vslamlab.yaml --overwrite
 ```
 
 ## Coloring Pointclouds
@@ -115,7 +123,7 @@ pixi run python vis/color_pointcloud_sesoko.py
 
 Populate your own csv files with image pairs for evaluation, following the format provided.
 * **select_eval_points.py:** The script will show the image pairs and clickable keypoints on the query image. User-clicked keypoints are projected onto the database image, where users can click on a projected point to move and correct its position. Must be run under the *lightglue* environment.
-* **project_eval_points.py:** Iterates over the image pairs in the csv file and projects query keypoints onto the database image. Projections are compared against uv_groundtruth (in the csv files) and reprojection error is measured. A *.npy* file is produced for each csv file, corresponding to a session combination.
+* **project_eval_points.py:** Iterates over the image pairs in the csv file and projects query keypoints onto the database image. Projections are compared against uv_groundtruth (in the csv files) and reprojection error is measured. Must be run under the *lightglue* environment. A *.npy* file is produced for each csv file, corresponding to a session combination.
 * **compute_rpe_from_projected_points.py:** Concatenates reprojection errors from each session combination into one *.npy* file. Also computes the mean and median rpe.
 * **plot_rpe.py:** Created a plot of median reprojection error for each method across the experiment subset. Inset shows a cropped plot of the top *x%*.
 
