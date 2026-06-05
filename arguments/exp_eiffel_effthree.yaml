@@ -1,0 +1,18 @@
+%YAML 1.2
+---
+
+exp_name: exp_eiffel_effthree_s10_hpc
+dataset: EIFFEL
+subset: effthree-s10
+
+# VPR-LAB
+log_dir: "/media/beverley/beverley_t7/SANGOHENKA-BENCHMARK/EIFFEL/effthree-s10"
+
+rgb_list_db: "/media/beverley/beverley_t7/SANGOHENKA-BENCHMARK/EIFFEL/effthree-s10/rgb.csv"
+rgb_list_q: "/media/beverley/beverley_t7/SANGOHENKA-BENCHMARK/EIFFEL/effthree-s10/rgb.csv"
+
+# DISTANCE MATRIX
+dist_threshold: 0.65
+
+# VSLAM-LAB exp
+# vslam_lab_exp: exp_eiffel_vslamlab.yaml

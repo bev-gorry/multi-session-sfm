@@ -1,5 +1,5 @@
-exp_sesoko_sskall_s05:
-  Config: test_config_rss_ssk_05.yaml
+exp_eiffel_effthree_s10_hpc:
+  Config: test_config_eiffel.yaml
   NumRuns: 1
   Parameters: {matcher_type: custom, verbose: 0}
   Module: glomap

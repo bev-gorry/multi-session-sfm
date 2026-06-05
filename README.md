@@ -116,7 +116,7 @@ pixi run -e vslamlab vslamlab ../../arguments/exp_test_vslamlab.yaml --overwrite
 Color each point in a pointcloud according to the year in which it is observed. This changes depending on the dataset.
 
 ```bash
-pixi run python vis/color_pointcloud_sesoko.py
+pixi run python vis/color_pointcloud_sesoko.py --exp_yaml=arguments/exp_test.yaml
 ```
 
 ## Evaluation
