@@ -40,17 +40,15 @@ git clone https://github.com/bev-gorry/multi-session-sfm.git && cd multi-session
 
 ## Setup
 
-Clone VSLAM-LAB and VPR-LAB:
+Initialize the included submodules:
 
 ```bash
-pixi run -e vslamlab git-clone
-pixi run -e vprlab git-clone-vpr-methods
+git submodule update --init --recursive
 ```
 
-**IMPORTANT:** Clone and install Lightglue in VSLAM-LAB
+**IMPORTANT:** Install LightGlue in editable mode:
 
 ```bash
-cd baselines/VSLAM_LAB
 pixi run -e lightglue install
 ```
 
@@ -112,11 +110,70 @@ Create an experiment yaml file (specific to your VSLAM-Lab exp) and ensure that 
 pixi run -e vslamlab vslamlab ../../arguments/exp_test_vslamlab.yaml --overwrite
 ```
 
+## Nerfstudio Training
+
+Nerfstudio is included as a git submodule at `baselines/nerfstudio`, using Tobias Fischer's fork. Train a Splatfacto model from the benchmark images and COLMAP output described by your experiment yaml:
+
+```bash
+pixi run train-splatfacto
+```
+
+By default this resolves `arguments/exp_test.yaml` to the benchmark image directory from `log_dir`, the VSLAM-LAB COLMAP model at `baselines/VSLAM-LAB-Evaluation/<exp_name>/<dataset>/<subset>/colmap_00000/0`, and runs Nerfstudio's COLMAP dataparser:
+
+```bash
+ns-train splatfacto --vis viewer colmap --data <benchmark-subset> --images-path rgb_0 --colmap-path <resolved-colmap-model>
+```
+
+To train on another COLMAP-backed dataset directory, pass the dataset root and COLMAP model explicitly:
+
+```bash
+pixi run train-splatfacto "--data=/path/to/monkey_output --images-path=images --colmap-path=/path/to/monkey_output/colmap/sparse/0 --vis=viewer"
+```
+
 ## Coloring Pointclouds
 Color each point in a pointcloud according to the year in which it is observed. This changes depending on the dataset.
 
 ```bash
 pixi run python vis/color_pointcloud_sesoko.py --exp_yaml=arguments/exp_test.yaml
+```
+
+## Rerun Visualization
+View the joint COLMAP reconstruction in [Rerun](https://rerun.io/), grouped by session/year. The viewer logs one toggleable entity tree per session, including camera images, per-image 2D point observations, and the 3D points observed by that session. It also logs point-track documents grouped by session, so a selected `POINT3D_ID` can be looked up under `world/point_tracks/pid_<POINT3D_ID>`.
+
+Generate one COLMAP-initialized Gaussian Splat PLY per session:
+
+```bash
+pixi run -e lightglue export-session-splats "--exp_yaml=arguments/exp_test.yaml"
+```
+
+The exporter writes splats to `outputs/gaussian_splats/<exp_name>/<dataset>/<subset>/`. The Rerun viewer automatically logs any `.ply` files from that directory under `world/gaussian_splats`, alongside the COLMAP point cloud and source images:
+
+```bash
+pixi run -e lightglue rerun-viewer "--exp_yaml=arguments/exp_test.yaml"
+```
+
+For large reconstructions, limit image logging while keeping all 3D points:
+
+```bash
+pixi run -e lightglue rerun-viewer "--exp_yaml=arguments/exp_test.yaml --max-images-per-session=25"
+```
+
+To write an `.rrd` file instead of spawning the viewer:
+
+```bash
+pixi run -e lightglue rerun-viewer "--exp_yaml=arguments/exp_test.yaml --output=outputs/session_view.rrd"
+```
+
+To provide splats from another pipeline such as Nerfstudio, pass them explicitly with `--splat-asset`, or point the viewer at a directory with `--splat-dir`:
+
+```bash
+pixi run -e lightglue rerun-viewer "--exp_yaml=arguments/exp_test.yaml --splat-asset=/path/to/splat.ply"
+```
+
+To also duplicate the actual projected images under each point-track entity, use `--log-track-images` with a cap:
+
+```bash
+pixi run -e lightglue rerun-viewer "--exp_yaml=arguments/exp_test.yaml --max-track-docs=50 --log-track-images"
 ```
 
 ## Evaluation
@@ -133,6 +190,7 @@ The following forked repositories are included in our repository:
 
 - [COLMAP](https://colmap.github.io/)
 - [LightGlue](https://github.com/cvg/LightGlue)
+- [Nerfstudio](https://github.com/Tobias-Fischer/nerfstudio)
 - [VPR-LAB](https://github.com/VSLAM-LAB/VPR-LAB)
 - [VSLAM-LAB](https://github.com/VSLAM-LAB/VSLAM-LAB)
 
