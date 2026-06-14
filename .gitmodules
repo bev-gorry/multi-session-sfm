@@ -1,0 +1,12 @@
+[submodule "baselines/nerfstudio"]
+	path = baselines/nerfstudio
+	url = https://github.com/Tobias-Fischer/nerfstudio
+[submodule "baselines/VPR-methods-evaluation"]
+	path = baselines/VPR-methods-evaluation
+	url = https://github.com/alejandrofontan/VPR-methods-evaluation.git
+[submodule "baselines/VSLAM_LAB"]
+	path = baselines/VSLAM_LAB
+	url = https://github.com/bev-gorry/VSLAM-LAB.git
+[submodule "baselines/LightGlue"]
+	path = baselines/LightGlue
+	url = https://github.com/cvg/LightGlue.git
