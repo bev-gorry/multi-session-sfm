@@ -149,31 +149,38 @@ pixi run -e lightglue export-session-splats "--exp_yaml=arguments/exp_test.yaml"
 The exporter writes splats to `outputs/gaussian_splats/<exp_name>/<dataset>/<subset>/`. The Rerun viewer automatically logs any `.ply` files from that directory under `world/gaussian_splats`, alongside the COLMAP point cloud and source images:
 
 ```bash
-pixi run -e lightglue rerun-viewer "--exp_yaml=arguments/exp_test.yaml"
+pixi run -e rerun-viewer rerun-viewer "--exp_yaml=arguments/exp_test.yaml"
 ```
+
+In Rerun, use the `Streams` tree to toggle layers:
+
+- `world/sessions/<session>/points3D` toggles the session point cloud in 3D.
+- Each image has `rgb/point_pixels`, which are the COLMAP 2D observations for that image.
+- Each image also has `rgb/reprojected_points/<session>`, which projects all in-frame 3D points from that source session into the image. Toggle `ssk16`, `ssk17`, and `ssk18` there to compare cross-year reprojections.
+- `world/gaussian_splats/<session>` toggles the decoded Gaussian splat centers. If they are hidden by the COLMAP points, temporarily disable `world/sessions/*/points3D` or increase their display radius with `--splat-radius-scale`.
 
 For large reconstructions, limit image logging while keeping all 3D points:
 
 ```bash
-pixi run -e lightglue rerun-viewer "--exp_yaml=arguments/exp_test.yaml --max-images-per-session=25"
+pixi run -e rerun-viewer rerun-viewer "--exp_yaml=arguments/exp_test.yaml --max-images-per-session=25"
 ```
 
 To write an `.rrd` file instead of spawning the viewer:
 
 ```bash
-pixi run -e lightglue rerun-viewer "--exp_yaml=arguments/exp_test.yaml --output=outputs/session_view.rrd"
+pixi run -e rerun-viewer rerun-viewer "--exp_yaml=arguments/exp_test.yaml --output=outputs/session_view.rrd"
 ```
 
 To provide splats from another pipeline such as Nerfstudio, pass them explicitly with `--splat-asset`, or point the viewer at a directory with `--splat-dir`:
 
 ```bash
-pixi run -e lightglue rerun-viewer "--exp_yaml=arguments/exp_test.yaml --splat-asset=/path/to/splat.ply"
+pixi run -e rerun-viewer rerun-viewer "--exp_yaml=arguments/exp_test.yaml --splat-asset=/path/to/splat.ply"
 ```
 
 To also duplicate the actual projected images under each point-track entity, use `--log-track-images` with a cap:
 
 ```bash
-pixi run -e lightglue rerun-viewer "--exp_yaml=arguments/exp_test.yaml --max-track-docs=50 --log-track-images"
+pixi run -e rerun-viewer rerun-viewer "--exp_yaml=arguments/exp_test.yaml --max-track-docs=50 --log-track-images"
 ```
 
 ## Evaluation

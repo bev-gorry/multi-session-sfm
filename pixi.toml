@@ -2,22 +2,28 @@
 authors = ["bev-gorry <beverley_g@hotmail.com>"]
 channels = ["conda-forge", "nvidia/label/cuda-12.0.0"]
 name = "multi-session-sfm"
-platforms = ["linux-64"]
+platforms = ["linux-64", "osx-arm64"]
 version = "0.1.0"
 
-[tasks]
+[environments]
+default = { features = ["pipeline"], no-default-feature = true }
+vslamlab = { features = ["pipeline", "vslamlab"], no-default-feature = true }
+vprlab = { features = ["pipeline", "vprlab"], no-default-feature = true }
+lightglue = { features = ["pipeline", "lightglue"], no-default-feature = true }
+rerun-viewer = { features = ["rerun-viewer"], no-default-feature = true }
+
+##### Full pipeline #####
+[feature.pipeline]
+platforms = ["linux-64"]
+
+[feature.pipeline.tasks]
 submodule-update.cmd = "git submodule update --init --recursive"
 train-splatfacto.cmd = "python -m scripts.train_nerfstudio {{ args }}"
 train-splatfacto.args = [
   { "arg" = "args", "default" = "--exp_yaml=arguments/exp_test.yaml" },
 ]
 
-[environments]
-vslamlab = { features = ["vslamlab"]}
-vprlab = { features = ["vprlab"]}
-lightglue = { features = ["lightglue"]}
-
-[dependencies]
+[feature.pipeline.dependencies]
 python = "*"
 opencv = "*"
 matplotlib = "*"
@@ -29,7 +35,7 @@ pytorch-gpu = "*"
 torchvision = ">=0.3"
 huggingface_hub = ">=1.18.0,<2"
 
-[system-requirements]
+[feature.pipeline.system-requirements]
 cuda = "12.0"
 
 ##### VSLAM-LAB #####
@@ -136,3 +142,23 @@ open3d = ">=0.19.0"
 transforms3d = ">=0.4.2,<0.5"
 rerun-sdk = ">=0.33,<0.34"
 pip = "*"
+
+##### Rerun Viewer #####
+[feature.rerun-viewer]
+channels = ["https://prefix.dev/conda-forge"]
+platforms = ["linux-64", "osx-arm64"]
+
+[feature.rerun-viewer.tasks]
+rerun-viewer.cmd = "python -m vis.rerun_viewer {{ args }}"
+rerun-viewer.args = [
+  { "arg" = "args", "default" = "--exp_yaml=arguments/exp_test.yaml" },
+]
+
+[feature.rerun-viewer.dependencies]
+python = ">=3.11,<3.13"
+numpy = "*"
+pandas = "*"
+py-opencv = "*"
+pyyaml = "*"
+rerun-sdk = ">=0.33,<0.34"
+tqdm = "*"

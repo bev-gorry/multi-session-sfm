@@ -31,6 +31,7 @@ GREY = [127, 127, 127]
 
 SESSION_COLORS = [BLUE, YELLOW, PINK]
 SHARED_COLOR = GREY
+SH_C0 = 0.28209479177387814
 
 
 @dataclass(frozen=True)
@@ -40,6 +41,14 @@ class Observation:
     image_name: str
     sequence_name: str
     xy: tuple[float, float]
+
+
+@dataclass(frozen=True)
+class SessionPointCloud:
+    point_ids: np.ndarray
+    positions: np.ndarray
+    colors: np.ndarray
+    labels: list[str]
 
 
 def _safe_entity_name(name: str) -> str:
@@ -57,7 +66,7 @@ def _load_rerun():
     except ImportError as exc:
         raise ImportError(
             "The rerun SDK is not installed. Run this through Pixi, e.g. "
-            "`pixi run -e lightglue rerun-viewer --exp_yaml=arguments/exp_test.yaml`."
+            "`pixi run -e rerun-viewer rerun-viewer --exp_yaml=arguments/exp_test.yaml`."
         ) from exc
     return rr
 
@@ -72,7 +81,7 @@ def _read_image_rgb(image_path: Path, strict_images: bool) -> np.ndarray | None:
         import cv2
     except ImportError as exc:
         raise ImportError(
-            "OpenCV is required to log images. Run through Pixi's lightglue environment."
+            "OpenCV is required to log images. Run through Pixi's rerun-viewer environment."
         ) from exc
 
     image_bgr = cv2.imread(str(image_path))
@@ -114,6 +123,13 @@ def _tint_rgb(original_rgb: np.ndarray, tint_rgb: list[int], alpha: float) -> np
         0,
         255,
     ).astype(np.uint8)
+
+
+def _session_color_map(sequences: list[str]) -> dict[str, list[int]]:
+    return {
+        sequence_name: SESSION_COLORS[idx % len(SESSION_COLORS)]
+        for idx, sequence_name in enumerate(sequences)
+    }
 
 
 def _image_lookup(rgb_df: pd.DataFrame) -> dict[str, pd.Series]:
@@ -184,6 +200,46 @@ def _collect_observations(points3d, images, rgb_lookup):
     return point_observations, image_observations, point_sequences, skipped
 
 
+def _build_session_point_clouds(
+    points3d,
+    point_sequences: dict[int, set[str]],
+    sequences: list[str],
+    alpha_tint: float,
+) -> dict[str, SessionPointCloud]:
+    session_color = _session_color_map(sequences)
+    clouds = {}
+
+    for sequence_name in sequences:
+        point_ids = []
+        positions = []
+        colors = []
+        labels = []
+
+        for point_id, point in points3d.items():
+            observed_sequences = point_sequences.get(int(point_id), set())
+            if sequence_name not in observed_sequences:
+                continue
+
+            color = (
+                session_color[sequence_name]
+                if len(observed_sequences) == 1
+                else SHARED_COLOR
+            )
+            point_ids.append(int(point_id))
+            positions.append(point.xyz)
+            colors.append(_tint_rgb(point.rgb, color, alpha_tint))
+            labels.append(f"pid={point_id} sessions={','.join(sorted(observed_sequences))}")
+
+        clouds[sequence_name] = SessionPointCloud(
+            point_ids=np.asarray(point_ids, dtype=np.int64),
+            positions=np.asarray(positions, dtype=np.float32),
+            colors=np.asarray(colors, dtype=np.uint8),
+            labels=labels,
+        )
+
+    return clouds
+
+
 def _log_world_header(rr, dataset: str, subset: str):
     rr.log("/", rr.ViewCoordinates.RIGHT_HAND_Z_UP, static=True)
     rr.log(
@@ -201,47 +257,97 @@ def _log_world_header(rr, dataset: str, subset: str):
 
 def _log_session_points(
     rr,
-    points3d,
-    point_sequences: dict[int, set[str]],
-    sequences: list[str],
-    alpha_tint: float,
+    session_point_clouds: dict[str, SessionPointCloud],
     point_radius: float,
 ):
-    session_color = {
-        sequence_name: SESSION_COLORS[idx % len(SESSION_COLORS)]
-        for idx, sequence_name in enumerate(sequences)
-    }
-
-    for sequence_name in sequences:
-        positions = []
-        colors = []
-        labels = []
-
-        for point_id, point in points3d.items():
-            observed_sequences = point_sequences.get(int(point_id), set())
-            if sequence_name not in observed_sequences:
-                continue
-
-            color = (
-                session_color[sequence_name]
-                if len(observed_sequences) == 1
-                else SHARED_COLOR
-            )
-            positions.append(point.xyz)
-            colors.append(_tint_rgb(point.rgb, color, alpha_tint))
-            labels.append(f"pid={point_id} sessions={','.join(sorted(observed_sequences))}")
-
-        if positions:
+    for sequence_name, cloud in session_point_clouds.items():
+        if len(cloud.positions):
             rr.log(
                 f"world/sessions/{sequence_name}/points3D",
                 rr.Points3D(
-                    np.asarray(positions),
-                    colors=np.asarray(colors, dtype=np.uint8),
-                    labels=labels,
+                    cloud.positions,
+                    colors=cloud.colors,
+                    labels=cloud.labels,
                     radii=point_radius,
                 ),
                 static=True,
             )
+
+
+def _project_points_to_image(positions: np.ndarray, image, camera) -> tuple[np.ndarray, np.ndarray]:
+    if len(positions) == 0:
+        return np.empty((0, 2), dtype=np.float32), np.empty(0, dtype=np.int64)
+
+    rotation = image.qvec2rotmat()
+    xyz_camera = positions @ rotation.T + image.tvec
+    x_camera = xyz_camera[:, 0]
+    y_camera = xyz_camera[:, 1]
+    z_camera = xyz_camera[:, 2]
+    in_front = z_camera > 0.0
+
+    x_normalized = np.zeros_like(x_camera)
+    y_normalized = np.zeros_like(y_camera)
+    x_normalized[in_front] = x_camera[in_front] / z_camera[in_front]
+    y_normalized[in_front] = y_camera[in_front] / z_camera[in_front]
+
+    params = camera.params
+    if camera.model == "SIMPLE_PINHOLE":
+        fx = fy = params[0]
+        cx, cy = params[1], params[2]
+        x_distorted = x_normalized
+        y_distorted = y_normalized
+    elif camera.model == "PINHOLE":
+        fx, fy = params[0], params[1]
+        cx, cy = params[2], params[3]
+        x_distorted = x_normalized
+        y_distorted = y_normalized
+    elif camera.model in {"SIMPLE_RADIAL", "SIMPLE_RADIAL_FISHEYE"}:
+        fx = fy = params[0]
+        cx, cy = params[1], params[2]
+        k1 = params[3]
+        r2 = x_normalized * x_normalized + y_normalized * y_normalized
+        distortion = 1.0 + k1 * r2
+        x_distorted = x_normalized * distortion
+        y_distorted = y_normalized * distortion
+    elif camera.model in {"RADIAL", "RADIAL_FISHEYE"}:
+        fx = fy = params[0]
+        cx, cy = params[1], params[2]
+        k1, k2 = params[3], params[4]
+        r2 = x_normalized * x_normalized + y_normalized * y_normalized
+        distortion = 1.0 + k1 * r2 + k2 * r2 * r2
+        x_distorted = x_normalized * distortion
+        y_distorted = y_normalized * distortion
+    elif camera.model == "OPENCV":
+        fx, fy, cx, cy, k1, k2, p1, p2 = params[:8]
+        r2 = x_normalized * x_normalized + y_normalized * y_normalized
+        radial = 1.0 + k1 * r2 + k2 * r2 * r2
+        x_distorted = (
+            x_normalized * radial
+            + 2.0 * p1 * x_normalized * y_normalized
+            + p2 * (r2 + 2.0 * x_normalized * x_normalized)
+        )
+        y_distorted = (
+            y_normalized * radial
+            + p1 * (r2 + 2.0 * y_normalized * y_normalized)
+            + 2.0 * p2 * x_normalized * y_normalized
+        )
+    else:
+        raise NotImplementedError(f"Unsupported COLMAP camera model: {camera.model}")
+
+    u = fx * x_distorted + cx
+    v = fy * y_distorted + cy
+    visible = (
+        in_front
+        & np.isfinite(u)
+        & np.isfinite(v)
+        & (u >= 0.0)
+        & (u < float(camera.width))
+        & (v >= 0.0)
+        & (v < float(camera.height))
+    )
+    indices = np.flatnonzero(visible)
+    xy = np.column_stack([u[indices], v[indices]]).astype(np.float32)
+    return xy, indices
 
 
 def _log_images(
@@ -249,14 +355,19 @@ def _log_images(
     cameras,
     images,
     image_observations: dict[int, list[Observation]],
+    session_point_clouds: dict[str, SessionPointCloud],
     rgb_lookup: dict[str, pd.Series],
     image_root: Path,
     sequences: list[str],
     max_images_per_session: int | None,
     strict_images: bool,
+    log_reprojected_points: bool,
+    reprojected_point_radius: float,
 ):
     logged_per_sequence = defaultdict(int)
     missing_images = 0
+    reprojected_per_sequence = defaultdict(int)
+    session_color = _session_color_map(sequences)
 
     for image_id, image in tqdm(images.items(), desc="Logging cameras and images"):
         sequence_name = _sequence_for_image(image.name, rgb_lookup)
@@ -323,9 +434,30 @@ def _log_images(
                 static=True,
             )
 
+        if log_reprojected_points:
+            for source_sequence, cloud in session_point_clouds.items():
+                xy, indices = _project_points_to_image(cloud.positions, image, camera)
+                if len(indices) == 0:
+                    continue
+
+                rr.log(
+                    f"{entity}/rgb/reprojected_points/{source_sequence}",
+                    rr.Points2D(
+                        xy,
+                        labels=[
+                            f"pid={int(cloud.point_ids[idx])} from={source_sequence}"
+                            for idx in indices
+                        ],
+                        colors=[session_color[source_sequence]],
+                        radii=reprojected_point_radius,
+                    ),
+                    static=True,
+                )
+                reprojected_per_sequence[source_sequence] += int(len(indices))
+
         logged_per_sequence[sequence_name] += 1
 
-    return logged_per_sequence, missing_images
+    return logged_per_sequence, missing_images, reprojected_per_sequence
 
 
 def _track_markdown(point_id: int, observations: list[Observation]) -> str:
@@ -430,14 +562,87 @@ def _default_splat_paths(splat_dir: Path, sequences: list[str]) -> list[Path]:
     return paths
 
 
-def _log_gaussian_splats(rr, splat_paths: list[str | Path]):
+def _read_gaussian_splat_ply(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    with path.open("rb") as f:
+        header_lines = []
+        while True:
+            line = f.readline()
+            if not line:
+                raise ValueError(f"PLY header did not terminate: {path}")
+            decoded = line.decode("ascii").strip()
+            header_lines.append(decoded)
+            if decoded == "end_header":
+                break
+
+        if header_lines[:2] != ["ply", "format binary_little_endian 1.0"]:
+            raise ValueError(f"Only binary_little_endian PLY splats are supported: {path}")
+
+        vertex_count = None
+        properties = []
+        in_vertex = False
+        for line in header_lines:
+            parts = line.split()
+            if parts[:2] == ["element", "vertex"]:
+                vertex_count = int(parts[2])
+                in_vertex = True
+                continue
+            if parts[:1] == ["element"]:
+                in_vertex = False
+                continue
+            if in_vertex and parts[:2] == ["property", "float"]:
+                properties.append(parts[2])
+
+        if vertex_count is None:
+            raise ValueError(f"PLY is missing a vertex element: {path}")
+
+        dtype = np.dtype([(name, "<f4") for name in properties])
+        vertices = np.fromfile(f, dtype=dtype, count=vertex_count)
+
+    required = {"x", "y", "z", "f_dc_0", "f_dc_1", "f_dc_2", "opacity"}
+    missing = sorted(required.difference(vertices.dtype.names or ()))
+    if missing:
+        raise ValueError(f"PLY is missing required Gaussian splat fields {missing}: {path}")
+
+    positions = np.column_stack([vertices["x"], vertices["y"], vertices["z"]])
+    dc_rgb = np.column_stack([vertices["f_dc_0"], vertices["f_dc_1"], vertices["f_dc_2"]])
+    rgb = np.clip((SH_C0 * dc_rgb + 0.5) * 255.0, 0, 255).astype(np.uint8)
+    opacity = 1.0 / (1.0 + np.exp(-vertices["opacity"]))
+    alpha = np.clip(opacity * 255.0, 0, 255).astype(np.uint8)
+    colors = np.column_stack([rgb, alpha])
+
+    scale_fields = [
+        name
+        for name in ("scale_0", "scale_1", "scale_2")
+        if name in vertices.dtype.names
+    ]
+    if scale_fields:
+        log_scales = np.column_stack([vertices[name] for name in scale_fields])
+        radii = np.exp(log_scales).mean(axis=1).astype(np.float32)
+    else:
+        radii = np.full(vertex_count, 0.015, dtype=np.float32)
+
+    return positions, colors, radii
+
+
+def _log_gaussian_splats(rr, splat_paths: list[str | Path], splat_radius_scale: float):
     for splat_path in splat_paths:
         path = Path(splat_path).expanduser().resolve()
         if not path.exists():
             raise FileNotFoundError(f"Gaussian splat asset not found: {path}")
+        positions, colors, radii = _read_gaussian_splat_ply(path)
+        radii = radii * splat_radius_scale
+        entity = f"world/gaussian_splats/{_safe_entity_name(path.name)}"
         rr.log(
-            f"world/gaussian_splats/{_safe_entity_name(path.name)}",
-            rr.Asset3D(path=path),
+            entity,
+            rr.Points3D(positions, colors=colors, radii=radii),
+            static=True,
+        )
+        rr.log(
+            f"{entity}/source",
+            rr.TextDocument(
+                f"`{path}`\n\nLogged {len(positions):,} Gaussian splat centers from PLY.",
+                media_type="text/markdown",
+            ),
             static=True,
         )
 
@@ -462,8 +667,17 @@ def _parse_args():
         help="Also log actual images under each point-track entity. Use with --max-track-docs on large reconstructions.",
     )
     parser.add_argument("--point-radius", type=float, default=0.015)
+    parser.add_argument("--reprojected-point-radius", type=float, default=2.0)
     parser.add_argument("--alpha-tint", type=float, default=0.4)
     parser.add_argument("--strict-images", action="store_true")
+    parser.add_argument(
+        "--no-reprojected-points",
+        action="store_true",
+        help=(
+            "Do not log per-image overlays of all in-frame 3D points from each session. "
+            "This is useful when exporting a smaller .rrd."
+        ),
+    )
     parser.add_argument(
         "--splat-asset",
         action="append",
@@ -480,6 +694,12 @@ def _parse_args():
         "--no-auto-splats",
         action="store_true",
         help="Disable automatic loading of .ply files from --splat-dir.",
+    )
+    parser.add_argument(
+        "--splat-radius-scale",
+        type=float,
+        default=1.0,
+        help="Multiply decoded Gaussian splat radii for easier inspection in Rerun.",
     )
     return parser.parse_args()
 
@@ -510,6 +730,9 @@ def main():
     point_observations, image_observations, point_sequences, skipped = _collect_observations(
         points3d, images, rgb_lookup
     )
+    session_point_clouds = _build_session_point_clouds(
+        points3d, point_sequences, sequences, alpha_tint=args.alpha_tint
+    )
 
     rr.init(args.application_id, spawn=args.output is None)
     if args.output:
@@ -519,22 +742,22 @@ def main():
     _log_world_header(rr, dataset, subset)
     _log_session_points(
         rr,
-        points3d,
-        point_sequences,
-        sequences,
-        alpha_tint=args.alpha_tint,
+        session_point_clouds,
         point_radius=args.point_radius,
     )
-    logged_images, missing_images = _log_images(
+    logged_images, missing_images, reprojected_points = _log_images(
         rr,
         cameras,
         images,
         image_observations,
+        session_point_clouds,
         rgb_lookup,
         image_root,
         sequences,
         max_images_per_session=args.max_images_per_session,
         strict_images=args.strict_images,
+        log_reprojected_points=not args.no_reprojected_points,
+        reprojected_point_radius=args.reprojected_point_radius,
     )
     logged_tracks = _log_point_tracks(
         rr,
@@ -550,12 +773,14 @@ def main():
     splat_paths = list(args.splat_asset)
     if not args.no_auto_splats:
         splat_paths.extend(_default_splat_paths(splat_dir, sequences))
-    _log_gaussian_splats(rr, splat_paths)
+    _log_gaussian_splats(rr, splat_paths, splat_radius_scale=args.splat_radius_scale)
 
     print(f"Logged sessions: {', '.join(sequences)}")
     if splat_paths:
         print(f"Logged Gaussian splat assets: {len(splat_paths)}")
     print(f"Logged images per session: {dict(logged_images)}")
+    if reprojected_points:
+        print(f"Logged reprojected 2D points by source session: {dict(reprojected_points)}")
     print(f"Logged point track documents: {logged_tracks}")
     if skipped:
         print(f"Skipped {skipped} point observations without image/session metadata.")
