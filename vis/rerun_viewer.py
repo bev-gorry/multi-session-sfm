@@ -46,9 +46,23 @@ class Observation:
 @dataclass(frozen=True)
 class SessionPointCloud:
     point_ids: np.ndarray
+    class_ids: np.ndarray
+    keypoint_ids: np.ndarray
     positions: np.ndarray
     colors: np.ndarray
     labels: list[str]
+    track_summaries: list[str]
+
+
+@dataclass(frozen=True)
+class ImageRecord:
+    frame: int
+    session_frame: int
+    timestamp_ns: int
+    image_id: int
+    image_name: str
+    sequence_name: str
+    image_path: Path
 
 
 def _safe_entity_name(name: str) -> str:
@@ -132,6 +146,13 @@ def _session_color_map(sequences: list[str]) -> dict[str, list[int]]:
     }
 
 
+def _point_identity_components(point_ids: np.ndarray | list[int]) -> tuple[np.ndarray, np.ndarray]:
+    point_ids = np.asarray(point_ids, dtype=np.uint64)
+    class_ids = (point_ids // 65536).astype(np.uint16)
+    keypoint_ids = (point_ids % 65536).astype(np.uint16)
+    return class_ids, keypoint_ids
+
+
 def _image_lookup(rgb_df: pd.DataFrame) -> dict[str, pd.Series]:
     lookup = {}
     for _, row in rgb_df.iterrows():
@@ -141,6 +162,13 @@ def _image_lookup(rgb_df: pd.DataFrame) -> dict[str, pd.Series]:
     return lookup
 
 
+def _timestamp_column(rgb_df: pd.DataFrame) -> str:
+    candidates = [col for col in rgb_df.columns if col.startswith("ts_rgb_0")]
+    if not candidates:
+        raise KeyError("rgb.csv must contain a timestamp column starting with 'ts_rgb_0'")
+    return candidates[0]
+
+
 def _sequence_for_image(image_name: str, lookup: dict[str, pd.Series]) -> str | None:
     if image_name in lookup:
         return str(lookup[image_name]["sequence_name"])
@@ -148,6 +176,101 @@ def _sequence_for_image(image_name: str, lookup: dict[str, pd.Series]) -> str | 
     if basename in lookup:
         return str(lookup[basename]["sequence_name"])
     return None
+
+
+def _prepare_image_records(
+    rgb_df: pd.DataFrame,
+    images,
+    rgb_lookup: dict[str, pd.Series],
+    image_root: Path,
+    sequences: list[str],
+    max_images_per_session: int | None,
+    strict_images: bool,
+) -> tuple[list[ImageRecord], int]:
+    timestamp_col = _timestamp_column(rgb_df)
+    image_by_name = {}
+    for image_id, image in images.items():
+        image_by_name[image.name] = (int(image_id), image)
+        image_by_name[Path(image.name).name] = (int(image_id), image)
+
+    rows = rgb_df.copy()
+    rows["sequence_name"] = rows["sequence_name"].astype(str)
+    rows = rows[rows["sequence_name"].isin(sequences)]
+    rows = rows.sort_values(["sequence_name", timestamp_col, "path_rgb_0"])
+
+    session_frame_by_path = {}
+    for sequence_name, group in rows.groupby("sequence_name", sort=False):
+        for session_frame, (_, row) in enumerate(group.iterrows()):
+            session_frame_by_path[Path(row["path_rgb_0"]).name] = session_frame
+
+    candidate_rows = rows.sort_values([timestamp_col, "sequence_name", "path_rgb_0"])
+    kept_per_sequence = defaultdict(int)
+    records = []
+    missing = 0
+
+    for _, row in candidate_rows.iterrows():
+        sequence_name = str(row["sequence_name"])
+        if (
+            max_images_per_session is not None
+            and kept_per_sequence[sequence_name] >= max_images_per_session
+        ):
+            continue
+
+        image_rel = Path(row["path_rgb_0"])
+        lookup_key = image_rel.name
+        image_item = image_by_name.get(lookup_key) or image_by_name.get(image_rel.as_posix())
+        if image_item is None:
+            missing += 1
+            continue
+
+        image_path = image_root / image_rel
+        if not image_path.exists():
+            missing += 1
+            if strict_images:
+                raise FileNotFoundError(f"Missing image: {image_path}")
+            continue
+
+        image_id, image = image_item
+        row_lookup = rgb_lookup.get(image.name)
+        if row_lookup is None:
+            row_lookup = rgb_lookup.get(Path(image.name).name)
+        if row_lookup is None:
+            missing += 1
+            continue
+
+        records.append(
+            ImageRecord(
+                frame=len(records),
+                session_frame=session_frame_by_path[lookup_key],
+                timestamp_ns=int(row[timestamp_col]),
+                image_id=image_id,
+                image_name=Path(image.name).name,
+                sequence_name=sequence_name,
+                image_path=image_path,
+            )
+        )
+        kept_per_sequence[sequence_name] += 1
+
+    return records, missing
+
+
+def _prepare_image_catalog(
+    rgb_df: pd.DataFrame,
+    images,
+    image_root: Path,
+    sequences: list[str],
+    strict_images: bool,
+) -> tuple[dict[int, ImageRecord], int]:
+    records, missing = _prepare_image_records(
+        rgb_df,
+        images,
+        _image_lookup(rgb_df),
+        image_root,
+        sequences,
+        max_images_per_session=None,
+        strict_images=strict_images,
+    )
+    return {record.image_id: record for record in records}, missing
 
 
 def _resolve_model_path(args, exp_name: str, dataset: str, subset: str) -> Path:
@@ -200,11 +323,30 @@ def _collect_observations(points3d, images, rgb_lookup):
     return point_observations, image_observations, point_sequences, skipped
 
 
+def _track_summary(observations: list[Observation], limit: int) -> str:
+    if not observations:
+        return "no registered image observations"
+
+    sorted_observations = sorted(
+        observations, key=lambda item: (item.sequence_name, item.image_name, item.xy)
+    )
+    pieces = [
+        f"{obs.sequence_name}:{obs.image_name}@({obs.xy[0]:.1f},{obs.xy[1]:.1f})"
+        for obs in sorted_observations[:limit]
+    ]
+    remaining = len(sorted_observations) - len(pieces)
+    if remaining > 0:
+        pieces.append(f"+{remaining} more")
+    return "; ".join(pieces)
+
+
 def _build_session_point_clouds(
     points3d,
+    point_observations: dict[int, list[Observation]],
     point_sequences: dict[int, set[str]],
     sequences: list[str],
     alpha_tint: float,
+    track_summary_limit: int,
 ) -> dict[str, SessionPointCloud]:
     session_color = _session_color_map(sequences)
     clouds = {}
@@ -214,6 +356,7 @@ def _build_session_point_clouds(
         positions = []
         colors = []
         labels = []
+        track_summaries = []
 
         for point_id, point in points3d.items():
             observed_sequences = point_sequences.get(int(point_id), set())
@@ -229,12 +372,20 @@ def _build_session_point_clouds(
             positions.append(point.xyz)
             colors.append(_tint_rgb(point.rgb, color, alpha_tint))
             labels.append(f"pid={point_id} sessions={','.join(sorted(observed_sequences))}")
+            track_summaries.append(
+                _track_summary(point_observations.get(int(point_id), []), track_summary_limit)
+            )
 
+        point_ids_array = np.asarray(point_ids, dtype=np.int64)
+        class_ids, keypoint_ids = _point_identity_components(point_ids_array)
         clouds[sequence_name] = SessionPointCloud(
-            point_ids=np.asarray(point_ids, dtype=np.int64),
+            point_ids=point_ids_array,
+            class_ids=class_ids,
+            keypoint_ids=keypoint_ids,
             positions=np.asarray(positions, dtype=np.float32),
             colors=np.asarray(colors, dtype=np.uint8),
             labels=labels,
+            track_summaries=track_summaries,
         )
 
     return clouds
@@ -246,9 +397,12 @@ def _log_world_header(rr, dataset: str, subset: str):
         "world/README",
         rr.TextDocument(
             f"# {dataset}/{subset}\n\n"
-            "Toggle sessions from the entity tree under `world/sessions`. "
-            "Each session contains camera/image entities and the 3D points observed by that session. "
-            "Point track documents are under `world/point_tracks/pid_<POINT3D_ID>`.",
+            "This is a precomputed-asset viewer: no reconstruction, retrieval, matching, "
+            "or VPR distance-matrix step is run here.\n\n"
+            "Scrub the `frame` timeline to step through sorted images. The `world/current_camera/image` "
+            "view shows the active image plus selectable 2D observations and cross-session "
+            "3D-point reprojections. Toggle point clouds, reprojection layers, rays, and "
+            "Gaussian splat centers from the entity tree.",
             media_type="text/markdown",
         ),
         static=True,
@@ -268,15 +422,33 @@ def _log_session_points(
                     cloud.positions,
                     colors=cloud.colors,
                     labels=cloud.labels,
+                    show_labels=False,
+                    class_ids=cloud.class_ids,
+                    keypoint_ids=cloud.keypoint_ids,
                     radii=point_radius,
+                ),
+                static=True,
+            )
+            rr.log(
+                f"world/sessions/{sequence_name}/points3D",
+                rr.AnyValues(
+                    point_id=cloud.point_ids.tolist(),
+                    session=[sequence_name] * len(cloud.point_ids),
+                    observations=cloud.track_summaries,
                 ),
                 static=True,
             )
 
 
-def _project_points_to_image(positions: np.ndarray, image, camera) -> tuple[np.ndarray, np.ndarray]:
+def _project_points_to_image(
+    positions: np.ndarray, image, camera
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     if len(positions) == 0:
-        return np.empty((0, 2), dtype=np.float32), np.empty(0, dtype=np.int64)
+        return (
+            np.empty((0, 2), dtype=np.float32),
+            np.empty(0, dtype=np.int64),
+            np.empty(0, dtype=np.float32),
+        )
 
     rotation = image.qvec2rotmat()
     xyz_camera = positions @ rotation.T + image.tvec
@@ -347,58 +519,24 @@ def _project_points_to_image(positions: np.ndarray, image, camera) -> tuple[np.n
     )
     indices = np.flatnonzero(visible)
     xy = np.column_stack([u[indices], v[indices]]).astype(np.float32)
-    return xy, indices
+    return xy, indices, z_camera[indices].astype(np.float32)
 
 
-def _log_images(
-    rr,
-    cameras,
-    images,
-    image_observations: dict[int, list[Observation]],
-    session_point_clouds: dict[str, SessionPointCloud],
-    rgb_lookup: dict[str, pd.Series],
-    image_root: Path,
-    sequences: list[str],
-    max_images_per_session: int | None,
-    strict_images: bool,
-    log_reprojected_points: bool,
-    reprojected_point_radius: float,
-):
-    logged_per_sequence = defaultdict(int)
-    missing_images = 0
-    reprojected_per_sequence = defaultdict(int)
-    session_color = _session_color_map(sequences)
+def _camera_center(image) -> np.ndarray:
+    rotation = image.qvec2rotmat()
+    return (-rotation.T @ image.tvec).astype(np.float32)
 
-    for image_id, image in tqdm(images.items(), desc="Logging cameras and images"):
-        sequence_name = _sequence_for_image(image.name, rgb_lookup)
-        if sequence_name not in sequences:
-            continue
-        if (
-            max_images_per_session is not None
-            and logged_per_sequence[sequence_name] >= max_images_per_session
-        ):
-            continue
 
-        row = rgb_lookup.get(image.name)
-        if row is None:
-            row = rgb_lookup.get(Path(image.name).name)
-        image_rel = Path(row["path_rgb_0"]) if row is not None else Path(image.name)
-        image_path = image_root / image_rel
-        if not image_path.exists():
-            missing_images += 1
-            if strict_images:
-                raise FileNotFoundError(f"Missing image: {image_path}")
-            continue
-
+def _log_static_cameras(rr, cameras, images, records: list[ImageRecord]):
+    for record in tqdm(records, desc="Logging static camera frustums"):
+        image = images[record.image_id]
         camera = cameras[image.camera_id]
-        entity = f"world/sessions/{sequence_name}/images/{_safe_entity_name(image.name)}"
-        rotation = image.qvec2rotmat()
-        translation = image.tvec
+        entity = f"world/sessions/{record.sequence_name}/cameras/{_safe_entity_name(record.image_name)}"
         rr.log(
             entity,
             rr.Transform3D(
-                mat3x3=rotation,
-                translation=translation,
+                mat3x3=image.qvec2rotmat(),
+                translation=image.tvec,
                 relation=rr.TransformRelation.ChildFromParent,
             ),
             static=True,
@@ -412,52 +550,456 @@ def _log_images(
             ),
             static=True,
         )
+        rr.log(
+            entity,
+            rr.AnyValues(
+                image_id=record.image_id,
+                image_name=record.image_name,
+                session=record.sequence_name,
+                frame=record.frame,
+                session_frame=record.session_frame,
+                timestamp_ns=record.timestamp_ns,
+            ),
+            static=True,
+        )
 
-        image_rgb = _read_image_rgb(image_path, strict_images)
-        if image_rgb is None:
-            missing_images += 1
-            continue
-        rr.log(f"{entity}/rgb", rr.Image(image_rgb), static=True)
 
-        observations = image_observations.get(int(image_id), [])
-        if observations:
-            rr.log(
-                f"{entity}/rgb/point_pixels",
-                rr.Points2D(
-                    [obs.xy for obs in observations],
-                    labels=[f"pid={obs.point_id}" for obs in observations],
-                    colors=[
-                        SESSION_COLORS[sequences.index(sequence_name) % len(SESSION_COLORS)]
-                    ],
-                    radii=3.0,
-                ),
-                static=True,
-            )
+def _log_2d_observations(
+    rr,
+    entity: str,
+    observations: list[Observation],
+    color: list[int],
+    target_record: ImageRecord,
+    radius: float,
+    static: bool = False,
+):
+    if not observations:
+        return
+
+    observation_point_ids = [obs.point_id for obs in observations]
+    observation_class_ids, observation_keypoint_ids = _point_identity_components(
+        observation_point_ids
+    )
+    rr.log(
+        entity,
+        rr.Points2D(
+            [obs.xy for obs in observations],
+            labels=[f"pid={obs.point_id}" for obs in observations],
+            show_labels=False,
+            class_ids=observation_class_ids,
+            keypoint_ids=observation_keypoint_ids,
+            colors=[color],
+            radii=radius,
+        ),
+        static=static,
+    )
+    rr.log(
+        entity,
+        rr.AnyValues(
+            point_id=observation_point_ids,
+            source_session=[obs.sequence_name for obs in observations],
+            target_session=[target_record.sequence_name] * len(observations),
+            target_image=[target_record.image_name] * len(observations),
+            pixel_u=[float(obs.xy[0]) for obs in observations],
+            pixel_v=[float(obs.xy[1]) for obs in observations],
+        ),
+        static=static,
+    )
+
+
+def _log_static_camera_images(
+    rr,
+    cameras,
+    images,
+    records: list[ImageRecord],
+    image_observations: dict[int, list[Observation]],
+    session_point_clouds: dict[str, SessionPointCloud],
+    sequences: list[str],
+    log_reprojected_points: bool,
+    reprojected_point_radius: float,
+    max_reprojected_points_per_session: int | None,
+):
+    session_color = _session_color_map(sequences)
+    for record in tqdm(records, desc="Logging static camera images"):
+        image = images[record.image_id]
+        camera = cameras[image.camera_id]
+        camera_entity = (
+            f"world/sessions/{record.sequence_name}/cameras/"
+            f"{_safe_entity_name(record.image_name)}"
+        )
+        image_entity = f"{camera_entity}/image"
+        rr.log(image_entity, rr.EncodedImage(path=record.image_path), static=True)
+        rr.log(
+            image_entity,
+            rr.AnyValues(
+                image_id=record.image_id,
+                image_name=record.image_name,
+                session=record.sequence_name,
+                frame=record.frame,
+                session_frame=record.session_frame,
+                timestamp_ns=record.timestamp_ns,
+            ),
+            static=True,
+        )
+        _log_2d_observations(
+            rr,
+            f"{image_entity}/observed_points",
+            image_observations.get(int(record.image_id), []),
+            session_color[record.sequence_name],
+            record,
+            radius=3.0,
+            static=True,
+        )
 
         if log_reprojected_points:
             for source_sequence, cloud in session_point_clouds.items():
-                xy, indices = _project_points_to_image(cloud.positions, image, camera)
+                xy, indices, depths = _project_points_to_image(
+                    cloud.positions, image, camera
+                )
                 if len(indices) == 0:
                     continue
+                if (
+                    max_reprojected_points_per_session is not None
+                    and len(indices) > max_reprojected_points_per_session
+                ):
+                    chosen = np.linspace(
+                        0, len(indices) - 1, max_reprojected_points_per_session
+                    ).astype(np.int64)
+                    xy = xy[chosen]
+                    indices = indices[chosen]
+                    depths = depths[chosen]
 
+                reprojection_entity = (
+                    f"{image_entity}/reprojected_points/{source_sequence}"
+                )
                 rr.log(
-                    f"{entity}/rgb/reprojected_points/{source_sequence}",
+                    reprojection_entity,
                     rr.Points2D(
                         xy,
                         labels=[
                             f"pid={int(cloud.point_ids[idx])} from={source_sequence}"
                             for idx in indices
                         ],
+                        show_labels=False,
+                        class_ids=cloud.class_ids[indices],
+                        keypoint_ids=cloud.keypoint_ids[indices],
                         colors=[session_color[source_sequence]],
                         radii=reprojected_point_radius,
                     ),
                     static=True,
                 )
+                rr.log(
+                    reprojection_entity,
+                    rr.AnyValues(
+                        point_id=[int(cloud.point_ids[idx]) for idx in indices],
+                        source_session=[source_sequence] * len(indices),
+                        target_session=[record.sequence_name] * len(indices),
+                        target_image=[record.image_name] * len(indices),
+                        pixel_u=xy[:, 0].astype(float).tolist(),
+                        pixel_v=xy[:, 1].astype(float).tolist(),
+                        depth=depths.astype(float).tolist(),
+                        world_x=cloud.positions[indices, 0].astype(float).tolist(),
+                        world_y=cloud.positions[indices, 1].astype(float).tolist(),
+                        world_z=cloud.positions[indices, 2].astype(float).tolist(),
+                    ),
+                    static=True,
+                )
+
+
+def _find_support_images(
+    record: ImageRecord,
+    image_observations: dict[int, list[Observation]],
+    point_observations: dict[int, list[Observation]],
+    image_catalog: dict[int, ImageRecord],
+    sequences: list[str],
+    support_images_per_session: int,
+    include_active_session: bool,
+) -> dict[str, list[tuple[ImageRecord, int]]]:
+    support = {sequence_name: [] for sequence_name in sequences}
+    if support_images_per_session <= 0:
+        return support
+
+    current_point_ids = {
+        obs.point_id for obs in image_observations.get(int(record.image_id), [])
+    }
+    if not current_point_ids:
+        return support
+
+    counts_by_image: dict[int, int] = defaultdict(int)
+    for point_id in current_point_ids:
+        for obs in point_observations.get(point_id, []):
+            if obs.image_id == record.image_id:
+                continue
+            candidate = image_catalog.get(int(obs.image_id))
+            if candidate is None:
+                continue
+            if (
+                not include_active_session
+                and candidate.sequence_name == record.sequence_name
+            ):
+                continue
+            counts_by_image[int(obs.image_id)] += 1
+
+    grouped: dict[str, list[tuple[ImageRecord, int]]] = defaultdict(list)
+    for image_id, shared_count in counts_by_image.items():
+        candidate = image_catalog.get(image_id)
+        if candidate is not None:
+            grouped[candidate.sequence_name].append((candidate, shared_count))
+
+    for sequence_name in sequences:
+        ranked = sorted(
+            grouped.get(sequence_name, []),
+            key=lambda item: (-item[1], abs(item[0].timestamp_ns - record.timestamp_ns), item[0].image_name),
+        )
+        support[sequence_name] = ranked[:support_images_per_session]
+
+    return support
+
+
+def _log_support_images(
+    rr,
+    cameras,
+    images,
+    record: ImageRecord,
+    image_observations: dict[int, list[Observation]],
+    point_observations: dict[int, list[Observation]],
+    image_catalog: dict[int, ImageRecord],
+    sequences: list[str],
+    support_images_per_session: int,
+    include_active_session: bool,
+):
+    if support_images_per_session <= 0:
+        return
+
+    session_color = _session_color_map(sequences)
+    rr.log("world/support_images", rr.Clear(recursive=True))
+    support_images = _find_support_images(
+        record,
+        image_observations,
+        point_observations,
+        image_catalog,
+        sequences,
+        support_images_per_session,
+        include_active_session,
+    )
+
+    for sequence_name, ranked_records in support_images.items():
+        for slot_idx, (support_record, shared_count) in enumerate(ranked_records):
+            image = images[support_record.image_id]
+            camera = cameras[image.camera_id]
+            entity = f"world/support_images/{sequence_name}/slot_{slot_idx}"
+            image_entity = f"{entity}/image"
+
+            rr.log(
+                entity,
+                rr.Transform3D(
+                    mat3x3=image.qvec2rotmat(),
+                    translation=image.tvec,
+                    relation=rr.TransformRelation.ChildFromParent,
+                ),
+            )
+            rr.log(
+                entity,
+                rr.Pinhole(
+                    image_from_camera=_camera_matrix(camera),
+                    resolution=[camera.width, camera.height],
+                    camera_xyz=rr.ViewCoordinates.RDF,
+                ),
+            )
+            rr.log(image_entity, rr.EncodedImage(path=support_record.image_path))
+            rr.log(
+                f"{image_entity}/status",
+                rr.TextDocument(
+                    "# Support image\n\n"
+                    f"- shared active-image points: `{shared_count}`\n"
+                    f"- session: `{support_record.sequence_name}`\n"
+                    f"- session_frame: `{support_record.session_frame}`\n"
+                    f"- image: `{support_record.image_name}`\n"
+                    f"- image_id: `{support_record.image_id}`",
+                    media_type="text/markdown",
+                ),
+            )
+            _log_2d_observations(
+                rr,
+                f"{image_entity}/observed_points",
+                image_observations.get(int(support_record.image_id), []),
+                session_color[sequence_name],
+                support_record,
+                radius=4.0,
+            )
+
+
+def _log_current_image_timeline(
+    rr,
+    cameras,
+    images,
+    records: list[ImageRecord],
+    image_observations: dict[int, list[Observation]],
+    point_observations: dict[int, list[Observation]],
+    image_catalog: dict[int, ImageRecord],
+    session_point_clouds: dict[str, SessionPointCloud],
+    sequences: list[str],
+    log_reprojected_points: bool,
+    reprojected_point_radius: float,
+    show_rays: bool,
+    max_rays_per_session: int,
+    max_reprojected_points_per_session: int | None,
+    support_images_per_session: int,
+    include_active_support_session: bool,
+):
+    logged_per_sequence = defaultdict(int)
+    reprojected_per_sequence = defaultdict(int)
+    session_color = _session_color_map(sequences)
+
+    for record in tqdm(records, desc="Logging timeline images"):
+        image = images[record.image_id]
+        camera = cameras[image.camera_id]
+        rr.set_time("frame", sequence=record.frame)
+        rr.set_time("capture_time", timestamp=record.timestamp_ns * 1e-9)
+
+        current_camera = "world/current_camera"
+        rr.log(
+            current_camera,
+            rr.Transform3D(
+                mat3x3=image.qvec2rotmat(),
+                translation=image.tvec,
+                relation=rr.TransformRelation.ChildFromParent,
+            ),
+        )
+        rr.log(
+            current_camera,
+            rr.Pinhole(
+                image_from_camera=_camera_matrix(camera),
+                resolution=[camera.width, camera.height],
+                camera_xyz=rr.ViewCoordinates.RDF,
+            ),
+        )
+
+        image_entity = "world/current_camera/image"
+        rr.log(image_entity, rr.EncodedImage(path=record.image_path))
+        rr.log(f"{image_entity}/observed_points", rr.Clear(recursive=True))
+        rr.log(f"{image_entity}/reprojected_points", rr.Clear(recursive=True))
+        rr.log("world/current_rays", rr.Clear(recursive=True))
+        rr.log(
+            "current/status",
+            rr.TextDocument(
+                "# Current image\n\n"
+                f"- frame: `{record.frame}`\n"
+                f"- session: `{record.sequence_name}`\n"
+                f"- session_frame: `{record.session_frame}`\n"
+                f"- image: `{record.image_name}`\n"
+                f"- image_id: `{record.image_id}`\n"
+                f"- timestamp_ns: `{record.timestamp_ns}`",
+                media_type="text/markdown",
+            ),
+        )
+        rr.log(
+            image_entity,
+            rr.AnyValues(
+                image_id=record.image_id,
+                image_name=record.image_name,
+                session=record.sequence_name,
+                frame=record.frame,
+                session_frame=record.session_frame,
+                timestamp_ns=record.timestamp_ns,
+            ),
+        )
+
+        observations = image_observations.get(int(record.image_id), [])
+        _log_2d_observations(
+            rr,
+            f"{image_entity}/observed_points",
+            observations,
+            session_color[record.sequence_name],
+            record,
+            radius=3.0,
+        )
+        _log_support_images(
+            rr,
+            cameras,
+            images,
+            record,
+            image_observations,
+            point_observations,
+            image_catalog,
+            sequences,
+            support_images_per_session,
+            include_active_support_session,
+        )
+
+        if log_reprojected_points:
+            for source_sequence, cloud in session_point_clouds.items():
+                xy, indices, depths = _project_points_to_image(cloud.positions, image, camera)
+                if len(indices) == 0:
+                    continue
+                if (
+                    max_reprojected_points_per_session is not None
+                    and len(indices) > max_reprojected_points_per_session
+                ):
+                    chosen = np.linspace(
+                        0, len(indices) - 1, max_reprojected_points_per_session
+                    ).astype(np.int64)
+                    xy = xy[chosen]
+                    indices = indices[chosen]
+                    depths = depths[chosen]
+
+                entity = f"{image_entity}/reprojected_points/{source_sequence}"
+                rr.log(
+                    entity,
+                    rr.Points2D(
+                        xy,
+                        labels=[
+                            f"pid={int(cloud.point_ids[idx])} from={source_sequence}"
+                            for idx in indices
+                        ],
+                        show_labels=False,
+                        class_ids=cloud.class_ids[indices],
+                        keypoint_ids=cloud.keypoint_ids[indices],
+                        colors=[session_color[source_sequence]],
+                        radii=reprojected_point_radius,
+                    ),
+                )
+                rr.log(
+                    entity,
+                    rr.AnyValues(
+                        point_id=[int(cloud.point_ids[idx]) for idx in indices],
+                        source_session=[source_sequence] * len(indices),
+                        target_session=[record.sequence_name] * len(indices),
+                        target_image=[record.image_name] * len(indices),
+                        pixel_u=xy[:, 0].astype(float).tolist(),
+                        pixel_v=xy[:, 1].astype(float).tolist(),
+                        depth=depths.astype(float).tolist(),
+                        world_x=cloud.positions[indices, 0].astype(float).tolist(),
+                        world_y=cloud.positions[indices, 1].astype(float).tolist(),
+                        world_z=cloud.positions[indices, 2].astype(float).tolist(),
+                    ),
+                )
                 reprojected_per_sequence[source_sequence] += int(len(indices))
 
-        logged_per_sequence[sequence_name] += 1
+                if show_rays and max_rays_per_session > 0:
+                    ray_indices = indices[:max_rays_per_session]
+                    camera_center = _camera_center(image)
+                    strips = [
+                        [camera_center, cloud.positions[idx].astype(np.float32)]
+                        for idx in ray_indices
+                    ]
+                    rr.log(
+                        f"world/current_rays/{source_sequence}",
+                        rr.LineStrips3D(
+                            strips,
+                            colors=[session_color[source_sequence]],
+                            radii=0.005,
+                            labels=[
+                                f"pid={int(cloud.point_ids[idx])} ray from {record.image_name}"
+                                for idx in ray_indices
+                            ],
+                            show_labels=False,
+                        ),
+                    )
 
-    return logged_per_sequence, missing_images, reprojected_per_sequence
+        logged_per_sequence[record.sequence_name] += 1
+
+    return logged_per_sequence, reprojected_per_sequence
 
 
 def _track_markdown(point_id: int, observations: list[Observation]) -> str:
@@ -498,12 +1040,15 @@ def _log_point_tracks(
             continue
 
         entity = f"world/point_tracks/pid_{point_id}"
+        class_ids, keypoint_ids = _point_identity_components([point_id])
         rr.log(
             f"{entity}/point",
             rr.Points3D(
                 [point.xyz],
                 colors=[point.rgb],
                 labels=[f"pid={point_id}"],
+                class_ids=class_ids,
+                keypoint_ids=keypoint_ids,
                 radii=point_radius * 2.0,
             ),
             static=True,
@@ -533,6 +1078,8 @@ def _log_point_tracks(
                     rr.Points2D(
                         [obs.xy],
                         labels=[f"pid={point_id}"],
+                        class_ids=class_ids,
+                        keypoint_ids=keypoint_ids,
                         colors=[PINK],
                         radii=8.0,
                     ),
@@ -624,27 +1171,347 @@ def _read_gaussian_splat_ply(path: Path) -> tuple[np.ndarray, np.ndarray, np.nda
     return positions, colors, radii
 
 
-def _log_gaussian_splats(rr, splat_paths: list[str | Path], splat_radius_scale: float):
+def _log_gaussian_splats(
+    rr,
+    splat_paths: list[str | Path],
+    splat_radius_scale: float,
+    splat_min_radius: float,
+    splat_max_radius: float | None,
+    splat_opacity_scale: float,
+    max_splats_per_session: int | None,
+):
     for splat_path in splat_paths:
         path = Path(splat_path).expanduser().resolve()
         if not path.exists():
             raise FileNotFoundError(f"Gaussian splat asset not found: {path}")
         positions, colors, radii = _read_gaussian_splat_ply(path)
+        total_splats = len(positions)
+        if max_splats_per_session is not None and total_splats > max_splats_per_session:
+            indices = np.linspace(0, total_splats - 1, max_splats_per_session).astype(
+                np.int64
+            )
+            positions = positions[indices]
+            colors = colors[indices]
+            radii = radii[indices]
         radii = radii * splat_radius_scale
-        entity = f"world/gaussian_splats/{_safe_entity_name(path.name)}"
+        if splat_min_radius > 0.0:
+            radii = np.maximum(radii, splat_min_radius)
+        if splat_max_radius is not None:
+            radii = np.minimum(radii, splat_max_radius)
+        if splat_opacity_scale != 1.0:
+            colors = colors.copy()
+            colors[:, 3] = np.clip(
+                colors[:, 3].astype(np.float32) * splat_opacity_scale, 0, 255
+            ).astype(np.uint8)
+        entity = f"world/gaussian_splats/{_safe_entity_name(path.stem)}"
         rr.log(
             entity,
             rr.Points3D(positions, colors=colors, radii=radii),
             static=True,
         )
         rr.log(
+            entity,
+            rr.AnyValues(
+                splat_asset=str(path),
+                logged_splats=len(positions),
+                total_splats=total_splats,
+                point_style_visualization=True,
+                true_gaussian_rasterizer=False,
+                splat_radius_scale=splat_radius_scale,
+                splat_min_radius=splat_min_radius,
+                splat_max_radius=-1.0 if splat_max_radius is None else splat_max_radius,
+                splat_opacity_scale=splat_opacity_scale,
+            ),
+            static=True,
+        )
+        rr.log(
             f"{entity}/source",
             rr.TextDocument(
-                f"`{path}`\n\nLogged {len(positions):,} Gaussian splat centers from PLY.",
+                f"`{path}`\n\n"
+                f"Logged {len(positions):,} of {total_splats:,} Gaussian splat centers "
+                "from PLY as a radius/opacity point proxy. Rerun 0.33 does not expose "
+                "a native anisotropic 3D Gaussian rasterizer, so this is improved "
+                "inspection geometry rather than continuous splat rendering.",
                 media_type="text/markdown",
             ),
             static=True,
         )
+
+
+def _log_inspected_point_tracks(
+    rr,
+    cameras,
+    images,
+    points3d,
+    point_observations: dict[int, list[Observation]],
+    image_catalog: dict[int, ImageRecord],
+    sequences: list[str],
+    point_ids: list[int],
+    max_observations_per_point: int | None,
+    image_view_limit: int,
+    ray_radius: float,
+) -> list[str]:
+    if not point_ids:
+        return []
+
+    session_color = _session_color_map(sequences)
+    image_view_origins = []
+
+    for point_id in point_ids:
+        point = points3d.get(int(point_id))
+        if point is None:
+            print(f"Warning: --inspect-point-id={point_id} is not in the COLMAP model.")
+            continue
+
+        observations = [
+            obs
+            for obs in point_observations.get(int(point_id), [])
+            if int(obs.image_id) in image_catalog
+        ]
+        observations = sorted(
+            observations,
+            key=lambda obs: (
+                obs.sequence_name,
+                image_catalog[int(obs.image_id)].timestamp_ns,
+                obs.image_name,
+            ),
+        )
+        total_observations = len(observations)
+        if (
+            max_observations_per_point is not None
+            and total_observations > max_observations_per_point
+        ):
+            observations = observations[:max_observations_per_point]
+
+        class_ids, keypoint_ids = _point_identity_components([int(point_id)])
+        point_xyz = np.asarray(point.xyz, dtype=np.float32)
+        base_entity = f"world/inspected_points/pid_{int(point_id)}"
+        rr.log(
+            base_entity,
+            rr.Points3D(
+                [point_xyz],
+                colors=[[255, 255, 255, 255]],
+                radii=[max(ray_radius * 3.0, 0.08)],
+                labels=[f"POINT3D_ID {int(point_id)}"],
+                class_ids=class_ids,
+                keypoint_ids=keypoint_ids,
+            ),
+            static=True,
+        )
+        rr.log(
+            base_entity,
+            rr.AnyValues(
+                point_id=int(point_id),
+                total_observations=total_observations,
+                logged_observations=len(observations),
+                world_x=float(point_xyz[0]),
+                world_y=float(point_xyz[1]),
+                world_z=float(point_xyz[2]),
+            ),
+            static=True,
+        )
+
+        rays = []
+        ray_colors = []
+        status_lines = [
+            f"# POINT3D_ID {int(point_id)}",
+            "",
+            f"- logged observations: `{len(observations)}` of `{total_observations}`",
+            f"- xyz: `({point_xyz[0]:.4f}, {point_xyz[1]:.4f}, {point_xyz[2]:.4f})`",
+            "",
+        ]
+
+        for obs_idx, obs in enumerate(observations):
+            record = image_catalog[int(obs.image_id)]
+            image = images[record.image_id]
+            camera = cameras[image.camera_id]
+            observation_entity = (
+                f"{base_entity}/observations/"
+                f"{obs_idx:03d}_{record.sequence_name}_{_safe_entity_name(record.image_name)}"
+            )
+            image_entity = f"{observation_entity}/image"
+            color = session_color[record.sequence_name]
+
+            rr.log(
+                observation_entity,
+                rr.Transform3D(
+                    mat3x3=image.qvec2rotmat(),
+                    translation=image.tvec,
+                    relation=rr.TransformRelation.ChildFromParent,
+                ),
+                static=True,
+            )
+            rr.log(
+                observation_entity,
+                rr.Pinhole(
+                    image_from_camera=_camera_matrix(camera),
+                    resolution=[camera.width, camera.height],
+                    camera_xyz=rr.ViewCoordinates.RDF,
+                ),
+                static=True,
+            )
+            rr.log(image_entity, rr.EncodedImage(path=record.image_path), static=True)
+            rr.log(
+                f"{image_entity}/point",
+                rr.Points2D(
+                    [obs.xy],
+                    labels=[f"pid={int(point_id)}"],
+                    show_labels=True,
+                    class_ids=class_ids,
+                    keypoint_ids=keypoint_ids,
+                    colors=[color],
+                    radii=10.0,
+                ),
+                static=True,
+            )
+            rr.log(
+                f"{image_entity}/point",
+                rr.AnyValues(
+                    point_id=int(point_id),
+                    source_session=obs.sequence_name,
+                    target_session=record.sequence_name,
+                    target_image=record.image_name,
+                    image_id=record.image_id,
+                    session_frame=record.session_frame,
+                    pixel_u=float(obs.xy[0]),
+                    pixel_v=float(obs.xy[1]),
+                    world_x=float(point_xyz[0]),
+                    world_y=float(point_xyz[1]),
+                    world_z=float(point_xyz[2]),
+                ),
+                static=True,
+            )
+            rr.log(
+                f"{image_entity}/status",
+                rr.TextDocument(
+                    "# Point observation\n\n"
+                    f"- point_id: `{int(point_id)}`\n"
+                    f"- session: `{record.sequence_name}`\n"
+                    f"- session_frame: `{record.session_frame}`\n"
+                    f"- image: `{record.image_name}`\n"
+                    f"- pixel: `({obs.xy[0]:.1f}, {obs.xy[1]:.1f})`",
+                    media_type="text/markdown",
+                ),
+                static=True,
+            )
+
+            rays.append([_camera_center(image), point_xyz])
+            ray_colors.append(color)
+            status_lines.append(
+                f"- `{record.sequence_name}` `{record.image_name}` "
+                f"pixel `({obs.xy[0]:.1f}, {obs.xy[1]:.1f})`"
+            )
+            if len(image_view_origins) < image_view_limit:
+                image_view_origins.append(image_entity)
+
+        if rays:
+            rr.log(
+                f"{base_entity}/rays",
+                rr.LineStrips3D(
+                    rays,
+                    colors=ray_colors,
+                    radii=ray_radius,
+                    labels=[
+                        f"pid={int(point_id)} obs={idx}" for idx in range(len(rays))
+                    ],
+                    show_labels=False,
+                ),
+                static=True,
+            )
+        rr.log(
+            f"{base_entity}/summary",
+            rr.TextDocument("\n".join(status_lines), media_type="text/markdown"),
+            static=True,
+        )
+
+    return image_view_origins
+
+
+def _send_blueprint(
+    rr,
+    sequences: list[str],
+    support_images_per_session: int,
+    inspected_image_origins: list[str] | None = None,
+):
+    try:
+        import rerun.blueprint as rrb
+    except ImportError:
+        return
+
+    right_views = []
+    row_shares = []
+
+    right_views.append(
+        rrb.Spatial2DView(
+            origin="world/current_camera/image",
+            name="Current image",
+        )
+    )
+    row_shares.append(4)
+
+    if support_images_per_session > 0:
+        support_views = []
+        for sequence_name in sequences:
+            for slot_idx in range(support_images_per_session):
+                support_views.append(
+                    rrb.Spatial2DView(
+                        origin=f"world/support_images/{sequence_name}/slot_{slot_idx}/image",
+                        name=f"{sequence_name} support {slot_idx + 1}",
+                    )
+                )
+        right_views.append(
+            rrb.Horizontal(
+                *support_views,
+                name="Cross-session support images",
+            )
+        )
+        row_shares.append(2)
+
+    if inspected_image_origins:
+        inspected_views = [
+            rrb.Spatial2DView(
+                origin=origin,
+                name=origin.split("/")[-2],
+            )
+            for origin in inspected_image_origins
+        ]
+        right_views.append(
+            rrb.Horizontal(
+                *inspected_views,
+                name="Inspected point observations",
+            )
+        )
+        row_shares.append(2)
+
+    right_views.append(
+        rrb.TextDocumentView(
+            origin="current/status",
+            name="Image status",
+        )
+    )
+    row_shares.append(1)
+
+    rr.send_blueprint(
+        rrb.Blueprint(
+            rrb.Horizontal(
+                rrb.Spatial3DView(
+                    origin="world",
+                    name="3D reconstruction",
+                    line_grid=False,
+                ),
+                rrb.Vertical(
+                    *right_views,
+                    row_shares=row_shares,
+                ),
+                column_shares=[3, 2],
+            ),
+            rrb.SelectionPanel(expanded=True),
+            rrb.TimePanel(expanded=True, timeline="frame"),
+            collapse_panels=False,
+        ),
+        make_active=True,
+        make_default=True,
+    )
 
 
 def _parse_args():
@@ -659,8 +1526,41 @@ def _parse_args():
     )
     parser.add_argument("--application-id", type=str, default="multi_session_sfm")
     parser.add_argument("--sessions", nargs="*", default=None, help="Subset/order of session names to log.")
-    parser.add_argument("--max-images-per-session", type=int, default=None)
-    parser.add_argument("--max-track-docs", type=int, default=None)
+    parser.add_argument(
+        "--max-images-per-session",
+        type=int,
+        default=25,
+        help="Maximum timeline images per session. Use --all-images for the complete sequence.",
+    )
+    parser.add_argument(
+        "--all-images",
+        action="store_true",
+        help="Log every sorted image on the timeline.",
+    )
+    parser.add_argument(
+        "--log-camera-images",
+        action="store_true",
+        help=(
+            "Also log each selected image and its 2D COLMAP observations under its "
+            "static camera frustum. Use with --all-images when every frustum should "
+            "open to an image and participate in point/image correspondence picking."
+        ),
+    )
+    parser.add_argument(
+        "--log-camera-reprojections",
+        action="store_true",
+        help=(
+            "When --log-camera-images is enabled, also log cross-session reprojection "
+            "overlays under each static camera image. This can be very large with "
+            "--all-images unless --max-reprojected-points-per-session is set."
+        ),
+    )
+    parser.add_argument(
+        "--max-track-docs",
+        type=int,
+        default=0,
+        help="Optional number of full point-track document entities to log. Default keeps the viewer light.",
+    )
     parser.add_argument(
         "--log-track-images",
         action="store_true",
@@ -679,6 +1579,72 @@ def _parse_args():
         ),
     )
     parser.add_argument(
+        "--max-reprojected-points-per-session",
+        type=int,
+        default=None,
+        help="Optional deterministic cap for each source-session reprojection overlay.",
+    )
+    parser.add_argument(
+        "--support-images-per-session",
+        type=int,
+        default=0,
+        help=(
+            "Show this many cross-session support images per session for the active image, "
+            "ranked by shared COLMAP 3D point tracks. Default is 0 to keep the viewer light."
+        ),
+    )
+    parser.add_argument(
+        "--support-include-active-session",
+        action="store_true",
+        help="Also show same-session support images in the support-image row.",
+    )
+    parser.add_argument(
+        "--show-rays",
+        action="store_true",
+        help="Draw capped camera-to-point rays for the current image.",
+    )
+    parser.add_argument(
+        "--max-rays-per-session",
+        type=int,
+        default=50,
+        help="Maximum rays to draw per source session when --show-rays is enabled.",
+    )
+    parser.add_argument(
+        "--point-metadata-observation-limit",
+        type=int,
+        default=12,
+        help="Number of image/pixel observations to include in each selectable 3D point summary.",
+    )
+    parser.add_argument(
+        "--inspect-point-id",
+        type=int,
+        action="append",
+        default=[],
+        help=(
+            "Focus the recording on this COLMAP POINT3D_ID. Can be repeated. "
+            "Logs the point, every logged observation image for its track, and "
+            "persistent camera-to-point rays under world/inspected_points."
+        ),
+    )
+    parser.add_argument(
+        "--max-inspect-observations-per-point",
+        type=int,
+        default=None,
+        help="Optional cap on logged observation images for each --inspect-point-id.",
+    )
+    parser.add_argument(
+        "--inspect-point-image-views",
+        type=int,
+        default=12,
+        help="Maximum inspected-point observation images to place directly in the blueprint.",
+    )
+    parser.add_argument(
+        "--inspect-ray-radius",
+        type=float,
+        default=0.03,
+        help="World-space radius for persistent inspected-point rays.",
+    )
+    parser.add_argument(
         "--splat-asset",
         action="append",
         default=[],
@@ -693,13 +1659,42 @@ def _parse_args():
     parser.add_argument(
         "--no-auto-splats",
         action="store_true",
-        help="Disable automatic loading of .ply files from --splat-dir.",
+        help="Disable automatic loading of .ply files from --splat-dir when --show-splats is used.",
+    )
+    parser.add_argument(
+        "--show-splats",
+        action="store_true",
+        help="Log precomputed Gaussian splat PLYs as toggleable radius/opacity point-proxy layers.",
+    )
+    parser.add_argument(
+        "--max-splats-per-session",
+        type=int,
+        default=100000,
+        help="Maximum splat centers to log per session. Use a negative value for no cap.",
     )
     parser.add_argument(
         "--splat-radius-scale",
         type=float,
-        default=1.0,
+        default=2.5,
         help="Multiply decoded Gaussian splat radii for easier inspection in Rerun.",
+    )
+    parser.add_argument(
+        "--splat-min-radius",
+        type=float,
+        default=0.01,
+        help="Clamp splat proxy radii to at least this world-space size. Use 0 to disable.",
+    )
+    parser.add_argument(
+        "--splat-max-radius",
+        type=float,
+        default=0.08,
+        help="Clamp splat proxy radii to at most this world-space size. Use a negative value to disable.",
+    )
+    parser.add_argument(
+        "--splat-opacity-scale",
+        type=float,
+        default=1.4,
+        help="Multiply decoded splat opacity alpha for the Rerun point proxy.",
     )
     return parser.parse_args()
 
@@ -724,14 +1719,40 @@ def main():
     sequences = args.sessions or list(dict.fromkeys(rgb_df["sequence_name"].astype(str)))
     if len(sequences) != 3:
         print(f"Warning: expected 3 sessions, logging {len(sequences)}: {sequences}")
+    max_images_per_session = None if args.all_images else args.max_images_per_session
+    max_splats_per_session = (
+        None if args.max_splats_per_session < 0 else args.max_splats_per_session
+    )
+    splat_max_radius = None if args.splat_max_radius < 0 else args.splat_max_radius
 
     cameras, images, points3d = read_model(str(model_path), ext="")
     rgb_lookup = _image_lookup(rgb_df)
+    image_catalog, catalog_missing_images = _prepare_image_catalog(
+        rgb_df,
+        images,
+        image_root,
+        sequences,
+        strict_images=args.strict_images,
+    )
+    image_records, missing_images = _prepare_image_records(
+        rgb_df,
+        images,
+        rgb_lookup,
+        image_root,
+        sequences,
+        max_images_per_session=max_images_per_session,
+        strict_images=args.strict_images,
+    )
     point_observations, image_observations, point_sequences, skipped = _collect_observations(
         points3d, images, rgb_lookup
     )
     session_point_clouds = _build_session_point_clouds(
-        points3d, point_sequences, sequences, alpha_tint=args.alpha_tint
+        points3d,
+        point_observations,
+        point_sequences,
+        sequences,
+        alpha_tint=args.alpha_tint,
+        track_summary_limit=args.point_metadata_observation_limit,
     )
 
     rr.init(args.application_id, spawn=args.output is None)
@@ -745,19 +1766,37 @@ def main():
         session_point_clouds,
         point_radius=args.point_radius,
     )
-    logged_images, missing_images, reprojected_points = _log_images(
+    _log_static_cameras(rr, cameras, images, image_records)
+    if args.log_camera_images:
+        _log_static_camera_images(
+            rr,
+            cameras,
+            images,
+            image_records,
+            image_observations,
+            session_point_clouds,
+            sequences,
+            log_reprojected_points=args.log_camera_reprojections,
+            reprojected_point_radius=args.reprojected_point_radius,
+            max_reprojected_points_per_session=args.max_reprojected_points_per_session,
+        )
+    logged_images, reprojected_points = _log_current_image_timeline(
         rr,
         cameras,
         images,
+        image_records,
         image_observations,
+        point_observations,
+        image_catalog,
         session_point_clouds,
-        rgb_lookup,
-        image_root,
         sequences,
-        max_images_per_session=args.max_images_per_session,
-        strict_images=args.strict_images,
         log_reprojected_points=not args.no_reprojected_points,
         reprojected_point_radius=args.reprojected_point_radius,
+        show_rays=args.show_rays,
+        max_rays_per_session=args.max_rays_per_session,
+        max_reprojected_points_per_session=args.max_reprojected_points_per_session,
+        support_images_per_session=args.support_images_per_session,
+        include_active_support_session=args.support_include_active_session,
     )
     logged_tracks = _log_point_tracks(
         rr,
@@ -771,13 +1810,45 @@ def main():
         strict_images=args.strict_images,
     )
     splat_paths = list(args.splat_asset)
-    if not args.no_auto_splats:
+    if args.show_splats and not args.no_auto_splats:
         splat_paths.extend(_default_splat_paths(splat_dir, sequences))
-    _log_gaussian_splats(rr, splat_paths, splat_radius_scale=args.splat_radius_scale)
+    _log_gaussian_splats(
+        rr,
+        splat_paths,
+        splat_radius_scale=args.splat_radius_scale,
+        splat_min_radius=args.splat_min_radius,
+        splat_max_radius=splat_max_radius,
+        splat_opacity_scale=args.splat_opacity_scale,
+        max_splats_per_session=max_splats_per_session,
+    )
+    inspected_image_origins = _log_inspected_point_tracks(
+        rr,
+        cameras,
+        images,
+        points3d,
+        point_observations,
+        image_catalog,
+        sequences,
+        point_ids=args.inspect_point_id,
+        max_observations_per_point=args.max_inspect_observations_per_point,
+        image_view_limit=args.inspect_point_image_views,
+        ray_radius=args.inspect_ray_radius,
+    )
+    _send_blueprint(
+        rr,
+        sequences,
+        support_images_per_session=args.support_images_per_session,
+        inspected_image_origins=inspected_image_origins,
+    )
 
     print(f"Logged sessions: {', '.join(sequences)}")
+    print(f"Logged timeline images: {len(image_records)}")
     if splat_paths:
         print(f"Logged Gaussian splat assets: {len(splat_paths)}")
+    if args.log_camera_images:
+        print(f"Logged static camera images: {len(image_records)}")
+    if inspected_image_origins:
+        print(f"Logged inspected point image views: {len(inspected_image_origins)}")
     print(f"Logged images per session: {dict(logged_images)}")
     if reprojected_points:
         print(f"Logged reprojected 2D points by source session: {dict(reprojected_points)}")
@@ -786,6 +1857,8 @@ def main():
         print(f"Skipped {skipped} point observations without image/session metadata.")
     if missing_images:
         print(f"Skipped {missing_images} missing image files.")
+    if catalog_missing_images:
+        print(f"Skipped {catalog_missing_images} missing catalog image files.")
 
 
 if __name__ == "__main__":
