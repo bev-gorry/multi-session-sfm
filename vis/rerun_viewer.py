@@ -65,6 +65,15 @@ class ImageRecord:
     image_path: Path
 
 
+@dataclass(frozen=True)
+class PixelLookupResult:
+    point_id: int
+    source_session: str
+    candidate_type: str
+    projected_xy: tuple[float, float]
+    distance_px: float
+
+
 def _safe_entity_name(name: str) -> str:
     stem = Path(name).stem
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", stem)
@@ -1238,6 +1247,175 @@ def _log_gaussian_splats(
         )
 
 
+def _find_image_record(
+    image_catalog: dict[int, ImageRecord],
+    image_name: str,
+) -> ImageRecord:
+    requested = Path(image_name).name
+    exact = [
+        record
+        for record in image_catalog.values()
+        if record.image_name == image_name or Path(record.image_name).name == requested
+    ]
+    if not exact:
+        raise ValueError(f"Could not find image '{image_name}' in the COLMAP/rgb.csv catalog.")
+    if len(exact) > 1:
+        sessions = ", ".join(sorted(record.sequence_name for record in exact))
+        raise ValueError(
+            f"Image name '{image_name}' is ambiguous across sessions: {sessions}. "
+            "Pass the catalog image name exactly as shown in Rerun."
+        )
+    return exact[0]
+
+
+def _nearest_projected_candidate(
+    cloud: SessionPointCloud,
+    image,
+    camera,
+    click_xy: np.ndarray,
+    source_session: str,
+) -> PixelLookupResult | None:
+    projected_xy, indices, _depths = _project_points_to_image(
+        cloud.positions, image, camera
+    )
+    if len(indices) == 0:
+        return None
+
+    distances = np.linalg.norm(projected_xy - click_xy[None, :], axis=1)
+    nearest_idx = int(np.argmin(distances))
+    cloud_idx = int(indices[nearest_idx])
+    xy = projected_xy[nearest_idx]
+    return PixelLookupResult(
+        point_id=int(cloud.point_ids[cloud_idx]),
+        source_session=source_session,
+        candidate_type="reprojected",
+        projected_xy=(float(xy[0]), float(xy[1])),
+        distance_px=float(distances[nearest_idx]),
+    )
+
+
+def _lookup_point_from_pixel(
+    cameras,
+    images,
+    record: ImageRecord,
+    click_xy: tuple[float, float],
+    image_observations: dict[int, list[Observation]],
+    session_point_clouds: dict[str, SessionPointCloud],
+    source_session: str | None,
+    max_distance_px: float,
+) -> tuple[PixelLookupResult, list[PixelLookupResult]]:
+    image = images[record.image_id]
+    camera = cameras[image.camera_id]
+    click = np.asarray(click_xy, dtype=np.float32)
+    candidates = []
+
+    if source_session is None:
+        observations = image_observations.get(int(record.image_id), [])
+        if observations:
+            observation_xy = np.asarray([obs.xy for obs in observations], dtype=np.float32)
+            distances = np.linalg.norm(observation_xy - click[None, :], axis=1)
+            nearest_idx = int(np.argmin(distances))
+            obs = observations[nearest_idx]
+            candidates.append(
+                PixelLookupResult(
+                    point_id=int(obs.point_id),
+                    source_session=record.sequence_name,
+                    candidate_type="observed",
+                    projected_xy=(float(obs.xy[0]), float(obs.xy[1])),
+                    distance_px=float(distances[nearest_idx]),
+                )
+            )
+        source_sessions = list(session_point_clouds)
+    else:
+        if source_session not in session_point_clouds:
+            raise ValueError(
+                f"Unknown --inspect-source-session '{source_session}'. "
+                f"Choose from: {', '.join(session_point_clouds)}"
+            )
+        source_sessions = [source_session]
+
+    for candidate_session in source_sessions:
+        candidate = _nearest_projected_candidate(
+            session_point_clouds[candidate_session],
+            image,
+            camera,
+            click,
+            candidate_session,
+        )
+        if candidate is not None:
+            candidates.append(candidate)
+
+    candidates = sorted(
+        candidates,
+        key=lambda candidate: (
+            candidate.distance_px,
+            candidate.candidate_type != "observed",
+            candidate.source_session,
+            candidate.point_id,
+        ),
+    )
+    if not candidates:
+        raise ValueError(
+            f"No observed or reprojected points were available for {record.image_name}."
+        )
+
+    selected = candidates[0]
+    if selected.distance_px > max_distance_px:
+        raise ValueError(
+            f"Nearest point is {selected.distance_px:.1f}px from the requested pixel, "
+            f"outside --inspect-pixel-max-distance={max_distance_px:.1f}px."
+        )
+    return selected, candidates
+
+
+def _print_point_correspondences(
+    result: PixelLookupResult,
+    target_record: ImageRecord,
+    click_xy: tuple[float, float],
+    candidates: list[PixelLookupResult],
+    point_observations: dict[int, list[Observation]],
+    image_catalog: dict[int, ImageRecord],
+):
+    print("")
+    print("Pixel correspondence lookup")
+    print(
+        f"  target: {target_record.sequence_name}/{target_record.image_name} "
+        f"pixel=({click_xy[0]:.1f}, {click_xy[1]:.1f})"
+    )
+    print(
+        f"  selected: point_id={result.point_id} source={result.source_session} "
+        f"type={result.candidate_type} projected=({result.projected_xy[0]:.1f}, "
+        f"{result.projected_xy[1]:.1f}) distance={result.distance_px:.2f}px"
+    )
+    print("  nearest candidate per available layer:")
+    for candidate in candidates:
+        print(
+            f"    {candidate.source_session:>8} {candidate.candidate_type:<11} "
+            f"pid={candidate.point_id:<10} distance={candidate.distance_px:6.2f}px "
+            f"xy=({candidate.projected_xy[0]:.1f}, {candidate.projected_xy[1]:.1f})"
+        )
+
+    observations = sorted(
+        point_observations.get(result.point_id, []),
+        key=lambda obs: (
+            obs.sequence_name,
+            image_catalog[int(obs.image_id)].timestamp_ns
+            if int(obs.image_id) in image_catalog
+            else 0,
+            obs.image_name,
+        ),
+    )
+    print("  COLMAP observation images:")
+    if not observations:
+        print("    none in the selected image catalog")
+    for obs in observations:
+        print(
+            f"    {obs.sequence_name}/{obs.image_name} "
+            f"pixel=({obs.xy[0]:.1f}, {obs.xy[1]:.1f})"
+        )
+    print("")
+
+
 def _log_inspected_point_tracks(
     rr,
     cameras,
@@ -1627,6 +1805,43 @@ def _parse_args():
         ),
     )
     parser.add_argument(
+        "--inspect-image",
+        type=str,
+        default=None,
+        help=(
+            "Resolve a point directly from an image name. Must be used with "
+            "--inspect-pixel. The resolved point is added to --inspect-point-id."
+        ),
+    )
+    parser.add_argument(
+        "--inspect-pixel",
+        type=float,
+        nargs=2,
+        metavar=("U", "V"),
+        default=None,
+        help="Pixel coordinate to look up in --inspect-image.",
+    )
+    parser.add_argument(
+        "--inspect-source-session",
+        type=str,
+        default=None,
+        help=(
+            "Restrict --inspect-pixel lookup to reprojected points from this source "
+            "session. Recommended when clicking a colored cross-session overlay."
+        ),
+    )
+    parser.add_argument(
+        "--inspect-pixel-max-distance",
+        type=float,
+        default=15.0,
+        help="Maximum pixel distance allowed for automatic image/pixel point lookup.",
+    )
+    parser.add_argument(
+        "--inspect-lookup-only",
+        action="store_true",
+        help="Print image/pixel correspondences and exit without logging or opening Rerun.",
+    )
+    parser.add_argument(
         "--max-inspect-observations-per-point",
         type=int,
         default=None,
@@ -1754,6 +1969,35 @@ def main():
         alpha_tint=args.alpha_tint,
         track_summary_limit=args.point_metadata_observation_limit,
     )
+
+    if (args.inspect_image is None) != (args.inspect_pixel is None):
+        raise ValueError("--inspect-image and --inspect-pixel must be provided together.")
+    if args.inspect_lookup_only and args.inspect_image is None:
+        raise ValueError("--inspect-lookup-only requires --inspect-image and --inspect-pixel.")
+    if args.inspect_image is not None and args.inspect_pixel is not None:
+        target_record = _find_image_record(image_catalog, args.inspect_image)
+        selected, candidates = _lookup_point_from_pixel(
+            cameras,
+            images,
+            target_record,
+            click_xy=(float(args.inspect_pixel[0]), float(args.inspect_pixel[1])),
+            image_observations=image_observations,
+            session_point_clouds=session_point_clouds,
+            source_session=args.inspect_source_session,
+            max_distance_px=args.inspect_pixel_max_distance,
+        )
+        _print_point_correspondences(
+            selected,
+            target_record,
+            click_xy=(float(args.inspect_pixel[0]), float(args.inspect_pixel[1])),
+            candidates=candidates,
+            point_observations=point_observations,
+            image_catalog=image_catalog,
+        )
+        if selected.point_id not in args.inspect_point_id:
+            args.inspect_point_id.append(selected.point_id)
+        if args.inspect_lookup_only:
+            return
 
     rr.init(args.application_id, spawn=args.output is None)
     if args.output:

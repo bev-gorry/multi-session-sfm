@@ -213,6 +213,20 @@ pixi run -e rerun-viewer rerun-viewer "--exp_yaml=arguments/exp_test.yaml --insp
 
 This logs `world/inspected_points/pid_<POINT3D_ID>` with a highlighted 3D point, persistent camera-to-point rays, and every COLMAP observation image for that point across all sessions in the precomputed model. Use `--max-inspect-observations-per-point` to cap very long tracks, and `--inspect-point-image-views` to control how many observation images are placed directly in the blueprint.
 
+If extracting the `point_id` from Rerun is awkward, look it up directly from an image and clicked pixel:
+
+```bash
+pixi run -e rerun-viewer rerun-viewer "--exp_yaml=arguments/exp_test.yaml --inspect-image=8315199.jpg --inspect-pixel 137.3 485.8 --inspect-source-session=ssk17"
+```
+
+The command finds the nearest reprojected point from `ssk17`, prints its `point_id` and every COLMAP observation image/pixel across all sessions, then automatically opens the inspected-point views and rays. Omit `--inspect-source-session` to compare the nearest observed/reprojected candidate from every session. The default lookup tolerance is 15 pixels; adjust it with `--inspect-pixel-max-distance`.
+
+For a quick terminal lookup without opening Rerun, add `--inspect-lookup-only`:
+
+```bash
+pixi run -e rerun-viewer rerun-viewer "--exp_yaml=arguments/exp_test.yaml --inspect-image=8315199.jpg --inspect-pixel 137.3 485.8 --inspect-source-session=ssk17 --inspect-lookup-only"
+```
+
 To write an `.rrd` file instead of spawning the viewer:
 
 ```bash
