@@ -74,6 +74,13 @@ class PixelLookupResult:
     distance_px: float
 
 
+@dataclass(frozen=True)
+class ReprojectionSourceInfo:
+    source_observations: tuple[tuple[str, int], ...]
+    source_images: tuple[str, ...]
+    all_track_images: tuple[str, ...]
+
+
 def _safe_entity_name(name: str) -> str:
     stem = Path(name).stem
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", stem)
@@ -547,6 +554,78 @@ def _camera_center(image) -> np.ndarray:
     return (-rotation.T @ image.tvec).astype(np.float32)
 
 
+def _reprojection_source_metadata(
+    point_ids: list[int],
+    source_session: str,
+    target_record: ImageRecord,
+    point_observations: dict[int, list[Observation]],
+    image_catalog: dict[int, ImageRecord],
+    cache: dict[tuple[int, str], ReprojectionSourceInfo],
+) -> dict[str, list]:
+    representative_images = []
+    source_image_counts = []
+    source_image_lists = []
+    all_track_image_counts = []
+    all_track_image_lists = []
+
+    for point_id in point_ids:
+        cache_key = (int(point_id), source_session)
+        info = cache.get(cache_key)
+        if info is None:
+            source_observations = []
+            source_images = []
+            all_track_images = []
+            seen_source_images = set()
+            seen_track_images = set()
+
+            for observation in point_observations.get(int(point_id), []):
+                record = image_catalog.get(int(observation.image_id))
+                if record is None:
+                    continue
+                track_name = f"{record.sequence_name}/{record.image_name}"
+                if track_name not in seen_track_images:
+                    seen_track_images.add(track_name)
+                    all_track_images.append(track_name)
+                if record.sequence_name != source_session:
+                    continue
+                source_observations.append((record.image_name, record.timestamp_ns))
+                if record.image_name not in seen_source_images:
+                    seen_source_images.add(record.image_name)
+                    source_images.append(record.image_name)
+
+            info = ReprojectionSourceInfo(
+                source_observations=tuple(source_observations),
+                source_images=tuple(source_images),
+                all_track_images=tuple(all_track_images),
+            )
+            cache[cache_key] = info
+
+        if info.source_observations:
+            representative_image = min(
+                info.source_observations,
+                key=lambda item: (
+                    abs(item[1] - target_record.timestamp_ns),
+                    item[0],
+                ),
+            )[0]
+        else:
+            representative_image = "(no registered source image)"
+
+        representative_images.append(representative_image)
+        source_image_counts.append(len(info.source_images))
+        source_image_lists.append(", ".join(info.source_images))
+        all_track_image_counts.append(len(info.all_track_images))
+        all_track_image_lists.append(", ".join(info.all_track_images))
+
+    return {
+        "representative_source_image": representative_images,
+        "source_observation_count": source_image_counts,
+        "source_observation_images": source_image_lists,
+        "all_track_image_count": all_track_image_counts,
+        "all_track_images": all_track_image_lists,
+    }
+
+
 def _log_static_cameras(rr, cameras, images, records: list[ImageRecord]):
     for record in tqdm(records, desc="Logging static camera frustums"):
         image = images[record.image_id]
@@ -633,6 +712,8 @@ def _log_static_camera_images(
     images,
     records: list[ImageRecord],
     image_observations: dict[int, list[Observation]],
+    point_observations: dict[int, list[Observation]],
+    image_catalog: dict[int, ImageRecord],
     session_point_clouds: dict[str, SessionPointCloud],
     sequences: list[str],
     log_reprojected_points: bool,
@@ -640,6 +721,7 @@ def _log_static_camera_images(
     max_reprojected_points_per_session: int | None,
 ):
     session_color = _session_color_map(sequences)
+    source_metadata_cache = {}
     for record in tqdm(records, desc="Logging static camera images"):
         image = images[record.image_id]
         camera = cameras[image.camera_id]
@@ -692,13 +774,28 @@ def _log_static_camera_images(
                 reprojection_entity = (
                     f"{image_entity}/reprojected_points/{source_sequence}"
                 )
+                projected_point_ids = [
+                    int(cloud.point_ids[idx]) for idx in indices
+                ]
+                source_metadata = _reprojection_source_metadata(
+                    projected_point_ids,
+                    source_sequence,
+                    record,
+                    point_observations,
+                    image_catalog,
+                    source_metadata_cache,
+                )
                 rr.log(
                     reprojection_entity,
                     rr.Points2D(
                         xy,
                         labels=[
-                            f"pid={int(cloud.point_ids[idx])} from={source_sequence}"
-                            for idx in indices
+                            f"pid={point_id} from={source_sequence}/"
+                            f"{source_image}"
+                            for point_id, source_image in zip(
+                                projected_point_ids,
+                                source_metadata["representative_source_image"],
+                            )
                         ],
                         show_labels=False,
                         class_ids=cloud.class_ids[indices],
@@ -711,7 +808,7 @@ def _log_static_camera_images(
                 rr.log(
                     reprojection_entity,
                     rr.AnyValues(
-                        point_id=[int(cloud.point_ids[idx]) for idx in indices],
+                        point_id=projected_point_ids,
                         source_session=[source_sequence] * len(indices),
                         target_session=[record.sequence_name] * len(indices),
                         target_image=[record.image_name] * len(indices),
@@ -721,6 +818,7 @@ def _log_static_camera_images(
                         world_x=cloud.positions[indices, 0].astype(float).tolist(),
                         world_y=cloud.positions[indices, 1].astype(float).tolist(),
                         world_z=cloud.positions[indices, 2].astype(float).tolist(),
+                        **source_metadata,
                     ),
                     static=True,
                 )
@@ -870,6 +968,7 @@ def _log_current_image_timeline(
     logged_per_sequence = defaultdict(int)
     reprojected_per_sequence = defaultdict(int)
     session_color = _session_color_map(sequences)
+    source_metadata_cache = {}
 
     for record in tqdm(records, desc="Logging timeline images"):
         image = images[record.image_id]
@@ -964,13 +1063,28 @@ def _log_current_image_timeline(
                     depths = depths[chosen]
 
                 entity = f"{image_entity}/reprojected_points/{source_sequence}"
+                projected_point_ids = [
+                    int(cloud.point_ids[idx]) for idx in indices
+                ]
+                source_metadata = _reprojection_source_metadata(
+                    projected_point_ids,
+                    source_sequence,
+                    record,
+                    point_observations,
+                    image_catalog,
+                    source_metadata_cache,
+                )
                 rr.log(
                     entity,
                     rr.Points2D(
                         xy,
                         labels=[
-                            f"pid={int(cloud.point_ids[idx])} from={source_sequence}"
-                            for idx in indices
+                            f"pid={point_id} from={source_sequence}/"
+                            f"{source_image}"
+                            for point_id, source_image in zip(
+                                projected_point_ids,
+                                source_metadata["representative_source_image"],
+                            )
                         ],
                         show_labels=False,
                         class_ids=cloud.class_ids[indices],
@@ -982,7 +1096,7 @@ def _log_current_image_timeline(
                 rr.log(
                     entity,
                     rr.AnyValues(
-                        point_id=[int(cloud.point_ids[idx]) for idx in indices],
+                        point_id=projected_point_ids,
                         source_session=[source_sequence] * len(indices),
                         target_session=[record.sequence_name] * len(indices),
                         target_image=[record.image_name] * len(indices),
@@ -992,6 +1106,7 @@ def _log_current_image_timeline(
                         world_x=cloud.positions[indices, 0].astype(float).tolist(),
                         world_y=cloud.positions[indices, 1].astype(float).tolist(),
                         world_z=cloud.positions[indices, 2].astype(float).tolist(),
+                        **source_metadata,
                     ),
                 )
                 reprojected_per_sequence[source_sequence] += int(len(indices))
@@ -2129,6 +2244,8 @@ def main():
                 images,
                 image_records,
                 image_observations,
+                point_observations,
+                image_catalog,
                 session_point_clouds,
                 sequences,
                 log_reprojected_points=args.log_camera_reprojections,

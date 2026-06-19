@@ -152,7 +152,7 @@ The exporter writes splats to `outputs/gaussian_splats/<exp_name>/<dataset>/<sub
 - `Current image` is a single timeline-driven image panel. Scrub the `frame` timeline to step through images sorted by timestamp; the status panel shows the image timestamp, session, and per-session frame.
 - `world/current_camera/image/observed_points` contains COLMAP 2D observations for the active image.
 - `world/current_camera/image/reprojected_points/<session>` contains all visible 3D points from that source session reprojected into the active image. Toggle `ssk16`, `ssk17`, and `ssk18` to compare sessions.
-- Selecting a 2D reprojection exposes point id, source session, target image, pixel, depth, and 3D coordinates in Rerun's selection panel.
+- Selecting a 2D reprojection exposes point id, source session, target image, pixel, depth, 3D coordinates, a representative source image, every source-session observation image, and every image in the COLMAP track. A reprojected point is derived from a 3D point rather than one unique source image, so the representative source image is the source-session observation closest in timestamp to the target image.
 - Selecting a 3D point cloud entity exposes point ids and compact observation summaries. Full point-track documents are opt-in.
 - Hovering/selecting a 3D point links to matching 2D observations/reprojections using the COLMAP `POINT3D_ID`, encoded into Rerun `class_id`/`keypoint_id` correspondence fields.
 - Static camera frustums are light by default. Add `--log-camera-images` when you want each logged frustum to contain its source image and COLMAP 2D observations, like the Rerun SfM demo.
