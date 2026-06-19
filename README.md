@@ -213,6 +213,14 @@ pixi run -e rerun-viewer rerun-viewer "--exp_yaml=arguments/exp_test.yaml --insp
 
 This logs `world/inspected_points/pid_<POINT3D_ID>` with a highlighted 3D point, persistent camera-to-point rays, and every COLMAP observation image for that point across all sessions in the precomputed model. Use `--max-inspect-observations-per-point` to cap very long tracks, and `--inspect-point-image-views` to control how many observation images are placed directly in the blueprint.
 
+Point-ID inspection is focused and lightweight by default: it does not load the full point clouds, timeline, or dense reprojection overlays, and places at most four observation images in the initial layout. Add `--inspect-with-context` only when the complete reconstruction context is needed.
+
+If only the corresponding filenames are needed, print them without opening Rerun:
+
+```bash
+pixi run -e rerun-viewer rerun-viewer "--exp_yaml=arguments/exp_test.yaml --inspect-point-id=1146 --inspect-lookup-only"
+```
+
 If extracting the `point_id` from Rerun is awkward, look it up directly from an image and clicked pixel:
 
 ```bash

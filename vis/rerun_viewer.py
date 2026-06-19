@@ -300,13 +300,24 @@ def _resolve_splat_dir(args, exp_name: str, dataset: str, subset: str) -> Path:
     return Path("outputs") / "gaussian_splats" / exp_name / dataset / subset
 
 
-def _collect_observations(points3d, images, rgb_lookup):
+def _collect_observations(points3d, images, rgb_lookup, point_ids: list[int] | None = None):
     point_observations: dict[int, list[Observation]] = defaultdict(list)
     image_observations: dict[int, list[Observation]] = defaultdict(list)
     point_sequences: dict[int, set[str]] = defaultdict(set)
     skipped = 0
 
-    for point_id, point in tqdm(points3d.items(), desc="Indexing point tracks"):
+    if point_ids is None:
+        point_items = points3d.items()
+        description = "Indexing point tracks"
+    else:
+        point_items = [
+            (int(point_id), points3d[int(point_id)])
+            for point_id in point_ids
+            if int(point_id) in points3d
+        ]
+        description = "Indexing inspected point tracks"
+
+    for point_id, point in tqdm(point_items, desc=description):
         for image_id, point2d_idx in zip(point.image_ids, point.point2D_idxs):
             image = images.get(int(image_id))
             if image is None or point2d_idx < 0 or point2d_idx >= len(image.xys):
@@ -1416,6 +1427,45 @@ def _print_point_correspondences(
     print("")
 
 
+def _print_point_id_correspondences(
+    point_ids: list[int],
+    points3d,
+    point_observations: dict[int, list[Observation]],
+    image_catalog: dict[int, ImageRecord],
+):
+    for point_id in point_ids:
+        point = points3d.get(int(point_id))
+        if point is None:
+            print(f"POINT3D_ID {point_id}: not found")
+            continue
+
+        observations = sorted(
+            point_observations.get(int(point_id), []),
+            key=lambda obs: (
+                obs.sequence_name,
+                image_catalog[int(obs.image_id)].timestamp_ns
+                if int(obs.image_id) in image_catalog
+                else 0,
+                obs.image_name,
+            ),
+        )
+        print("")
+        print(f"POINT3D_ID {int(point_id)}")
+        print(
+            f"  xyz=({float(point.xyz[0]):.4f}, {float(point.xyz[1]):.4f}, "
+            f"{float(point.xyz[2]):.4f})"
+        )
+        print(f"  COLMAP observation images: {len(observations)}")
+        if not observations:
+            print("    none in the selected image catalog")
+        for obs in observations:
+            print(
+                f"    {obs.sequence_name}/{obs.image_name} "
+                f"pixel=({obs.xy[0]:.1f}, {obs.xy[1]:.1f})"
+            )
+        print("")
+
+
 def _log_inspected_point_tracks(
     rr,
     cameras,
@@ -1610,6 +1660,8 @@ def _send_blueprint(
     sequences: list[str],
     support_images_per_session: int,
     inspected_image_origins: list[str] | None = None,
+    inspected_point_ids: list[int] | None = None,
+    focused_inspection: bool = False,
 ):
     try:
         import rerun.blueprint as rrb
@@ -1619,15 +1671,16 @@ def _send_blueprint(
     right_views = []
     row_shares = []
 
-    right_views.append(
-        rrb.Spatial2DView(
-            origin="world/current_camera/image",
-            name="Current image",
+    if not focused_inspection:
+        right_views.append(
+            rrb.Spatial2DView(
+                origin="world/current_camera/image",
+                name="Current image",
+            )
         )
-    )
-    row_shares.append(4)
+        row_shares.append(4)
 
-    if support_images_per_session > 0:
+    if not focused_inspection and support_images_per_session > 0:
         support_views = []
         for sequence_name in sequences:
             for slot_idx in range(support_images_per_session):
@@ -1661,30 +1714,43 @@ def _send_blueprint(
         )
         row_shares.append(2)
 
+    summary_origin = "current/status"
+    summary_name = "Image status"
+    if focused_inspection and inspected_point_ids:
+        summary_origin = f"world/inspected_points/pid_{int(inspected_point_ids[0])}/summary"
+        summary_name = "Point observations"
+    elif focused_inspection:
+        summary_origin = "world/README"
+        summary_name = "Inspection status"
+
     right_views.append(
         rrb.TextDocumentView(
-            origin="current/status",
-            name="Image status",
+            origin=summary_origin,
+            name=summary_name,
         )
     )
     row_shares.append(1)
 
+    layout = rrb.Horizontal(
+        rrb.Spatial3DView(
+            origin="world",
+            name="3D reconstruction",
+            line_grid=False,
+        ),
+        rrb.Vertical(
+            *right_views,
+            row_shares=row_shares,
+        ),
+        column_shares=[3, 2],
+    )
+    panels = [rrb.SelectionPanel(expanded=True)]
+    if not focused_inspection:
+        panels.append(rrb.TimePanel(expanded=True, timeline="frame"))
+
     rr.send_blueprint(
         rrb.Blueprint(
-            rrb.Horizontal(
-                rrb.Spatial3DView(
-                    origin="world",
-                    name="3D reconstruction",
-                    line_grid=False,
-                ),
-                rrb.Vertical(
-                    *right_views,
-                    row_shares=row_shares,
-                ),
-                column_shares=[3, 2],
-            ),
-            rrb.SelectionPanel(expanded=True),
-            rrb.TimePanel(expanded=True, timeline="frame"),
+            layout,
+            *panels,
             collapse_panels=False,
         ),
         make_active=True,
@@ -1839,7 +1905,19 @@ def _parse_args():
     parser.add_argument(
         "--inspect-lookup-only",
         action="store_true",
-        help="Print image/pixel correspondences and exit without logging or opening Rerun.",
+        help=(
+            "Print correspondences for --inspect-point-id or image/pixel lookup and "
+            "exit without logging or opening Rerun."
+        ),
+    )
+    parser.add_argument(
+        "--inspect-with-context",
+        action="store_true",
+        help=(
+            "Keep the full point clouds, camera timeline, and reprojection overlays "
+            "when inspecting points. By default point inspection uses a lightweight "
+            "focused recording."
+        ),
     )
     parser.add_argument(
         "--max-inspect-observations-per-point",
@@ -1850,7 +1928,7 @@ def _parse_args():
     parser.add_argument(
         "--inspect-point-image-views",
         type=int,
-        default=12,
+        default=4,
         help="Maximum inspected-point observation images to place directly in the blueprint.",
     )
     parser.add_argument(
@@ -1958,22 +2036,48 @@ def main():
         max_images_per_session=max_images_per_session,
         strict_images=args.strict_images,
     )
-    point_observations, image_observations, point_sequences, skipped = _collect_observations(
-        points3d, images, rgb_lookup
+    direct_point_id_path = (
+        bool(args.inspect_point_id)
+        and args.inspect_image is None
+        and (args.inspect_lookup_only or not args.inspect_with_context)
     )
-    session_point_clouds = _build_session_point_clouds(
+    point_observations, image_observations, point_sequences, skipped = _collect_observations(
         points3d,
-        point_observations,
-        point_sequences,
-        sequences,
-        alpha_tint=args.alpha_tint,
-        track_summary_limit=args.point_metadata_observation_limit,
+        images,
+        rgb_lookup,
+        point_ids=args.inspect_point_id if direct_point_id_path else None,
     )
 
     if (args.inspect_image is None) != (args.inspect_pixel is None):
         raise ValueError("--inspect-image and --inspect-pixel must be provided together.")
-    if args.inspect_lookup_only and args.inspect_image is None:
-        raise ValueError("--inspect-lookup-only requires --inspect-image and --inspect-pixel.")
+    pixel_lookup_requested = args.inspect_image is not None
+    if args.inspect_lookup_only and not pixel_lookup_requested and not args.inspect_point_id:
+        raise ValueError(
+            "--inspect-lookup-only requires --inspect-point-id or "
+            "--inspect-image with --inspect-pixel."
+        )
+    if args.inspect_lookup_only and not pixel_lookup_requested:
+        _print_point_id_correspondences(
+            args.inspect_point_id,
+            points3d,
+            point_observations,
+            image_catalog,
+        )
+        return
+
+    focused_point_id_mode = bool(args.inspect_point_id) and not args.inspect_with_context
+    needs_session_point_clouds = pixel_lookup_requested or not focused_point_id_mode
+    session_point_clouds = {}
+    if needs_session_point_clouds:
+        session_point_clouds = _build_session_point_clouds(
+            points3d,
+            point_observations,
+            point_sequences,
+            sequences,
+            alpha_tint=args.alpha_tint,
+            track_summary_limit=args.point_metadata_observation_limit,
+        )
+
     if args.inspect_image is not None and args.inspect_pixel is not None:
         target_record = _find_image_record(image_catalog, args.inspect_image)
         selected, candidates = _lookup_point_from_pixel(
@@ -1999,60 +2103,67 @@ def main():
         if args.inspect_lookup_only:
             return
 
+    focused_inspection = bool(args.inspect_point_id) and not args.inspect_with_context
+
     rr.init(args.application_id, spawn=args.output is None)
     if args.output:
         Path(args.output).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
         rr.save(args.output)
 
     _log_world_header(rr, dataset, subset)
-    _log_session_points(
-        rr,
-        session_point_clouds,
-        point_radius=args.point_radius,
-    )
-    _log_static_cameras(rr, cameras, images, image_records)
-    if args.log_camera_images:
-        _log_static_camera_images(
+    logged_images = defaultdict(int)
+    reprojected_points = defaultdict(int)
+    logged_tracks = 0
+
+    if not focused_inspection:
+        _log_session_points(
+            rr,
+            session_point_clouds,
+            point_radius=args.point_radius,
+        )
+        _log_static_cameras(rr, cameras, images, image_records)
+        if args.log_camera_images:
+            _log_static_camera_images(
+                rr,
+                cameras,
+                images,
+                image_records,
+                image_observations,
+                session_point_clouds,
+                sequences,
+                log_reprojected_points=args.log_camera_reprojections,
+                reprojected_point_radius=args.reprojected_point_radius,
+                max_reprojected_points_per_session=args.max_reprojected_points_per_session,
+            )
+        logged_images, reprojected_points = _log_current_image_timeline(
             rr,
             cameras,
             images,
             image_records,
             image_observations,
+            point_observations,
+            image_catalog,
             session_point_clouds,
             sequences,
-            log_reprojected_points=args.log_camera_reprojections,
+            log_reprojected_points=not args.no_reprojected_points,
             reprojected_point_radius=args.reprojected_point_radius,
+            show_rays=args.show_rays,
+            max_rays_per_session=args.max_rays_per_session,
             max_reprojected_points_per_session=args.max_reprojected_points_per_session,
+            support_images_per_session=args.support_images_per_session,
+            include_active_support_session=args.support_include_active_session,
         )
-    logged_images, reprojected_points = _log_current_image_timeline(
-        rr,
-        cameras,
-        images,
-        image_records,
-        image_observations,
-        point_observations,
-        image_catalog,
-        session_point_clouds,
-        sequences,
-        log_reprojected_points=not args.no_reprojected_points,
-        reprojected_point_radius=args.reprojected_point_radius,
-        show_rays=args.show_rays,
-        max_rays_per_session=args.max_rays_per_session,
-        max_reprojected_points_per_session=args.max_reprojected_points_per_session,
-        support_images_per_session=args.support_images_per_session,
-        include_active_support_session=args.support_include_active_session,
-    )
-    logged_tracks = _log_point_tracks(
-        rr,
-        points3d,
-        point_observations,
-        max_track_docs=args.max_track_docs,
-        point_radius=args.point_radius,
-        log_track_images=args.log_track_images,
-        image_root=image_root,
-        rgb_lookup=rgb_lookup,
-        strict_images=args.strict_images,
-    )
+        logged_tracks = _log_point_tracks(
+            rr,
+            points3d,
+            point_observations,
+            max_track_docs=args.max_track_docs,
+            point_radius=args.point_radius,
+            log_track_images=args.log_track_images,
+            image_root=image_root,
+            rgb_lookup=rgb_lookup,
+            strict_images=args.strict_images,
+        )
     splat_paths = list(args.splat_asset)
     if args.show_splats and not args.no_auto_splats:
         splat_paths.extend(_default_splat_paths(splat_dir, sequences))
@@ -2083,13 +2194,15 @@ def main():
         sequences,
         support_images_per_session=args.support_images_per_session,
         inspected_image_origins=inspected_image_origins,
+        inspected_point_ids=args.inspect_point_id,
+        focused_inspection=focused_inspection,
     )
 
     print(f"Logged sessions: {', '.join(sequences)}")
-    print(f"Logged timeline images: {len(image_records)}")
+    print(f"Logged timeline images: {0 if focused_inspection else len(image_records)}")
     if splat_paths:
         print(f"Logged Gaussian splat assets: {len(splat_paths)}")
-    if args.log_camera_images:
+    if args.log_camera_images and not focused_inspection:
         print(f"Logged static camera images: {len(image_records)}")
     if inspected_image_origins:
         print(f"Logged inspected point image views: {len(inspected_image_origins)}")
