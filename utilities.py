@@ -1,7 +1,6 @@
 import os
 import sys
 import cv2
-import yaml
 import torch
 import numpy as np
 # import pandas as pd
@@ -19,6 +18,7 @@ sys.path.append(root)
 
 from baselines.VSLAM_LAB.Baselines.LightGlue.lightglue import LightGlue, SuperPoint, SIFT
 from baselines.VSLAM_LAB.Baselines.LightGlue.lightglue.utils import load_image, rbd
+from experiment import load_exp_yaml
 
 BLUE = [106, 178, 212]
 YELLOW = [243, 201, 9]
@@ -35,8 +35,7 @@ red    = [c / 255.0 for c in RED]
 green  = [c / 255.0 for c in GREEN]
 
 def parse_yaml(yaml_file):
-    with open (yaml_file, 'r') as f:
-        args = yaml.safe_load(f)
+    args = load_exp_yaml(yaml_file)
     
     exp_name = args['exp_name']
     
