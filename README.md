@@ -134,7 +134,7 @@ pixi run train-splatfacto "--data=/path/to/monkey_output --images-path=images --
 Color each point in a pointcloud according to the year in which it is observed. This changes depending on the dataset.
 
 ```bash
-pixi run python vis/color_pointcloud_sesoko.py --exp_yaml=arguments/exp_test.yaml
+pixi run -e lightglue python vis/color_pointcloud_sesoko.py --exp_yaml=arguments/exp_test.yaml
 ```
 
 ## Rerun Visualization
