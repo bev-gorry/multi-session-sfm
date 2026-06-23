@@ -37,8 +37,9 @@ grey   = [c / 255.0 for c in GREY]
 
 if __name__ == "__main__":
     
-    METHOD = "OURS"   # 'ours' or 'colmap' or 'icp' or 'buffer' or 'vpr' or 'seq'
-    
+    year_pairs = ["2016-2017", "2016-2018", "2017-2018"]   # SESOKO
+    # year_pairs = ["2015-2016", "2015-2018", "2016-2018"]   # EIFFEL
+
     parser = argparse.ArgumentParser(description="")
     parser.add_argument("--exp_yaml", type=str, default="arguments/exp_test.yaml", help="Path to experiment YAML file.")
     
@@ -49,21 +50,23 @@ if __name__ == "__main__":
     all_errors = []
     
     csv_files = [
-        f"{EVAL_POINTS_DIR}/{dataset}/{subset}/evaluation_points_2016-2017.csv",
-        f"{EVAL_POINTS_DIR}/{dataset}/{subset}/evaluation_points_2016-2018.csv",
-        f"{EVAL_POINTS_DIR}/{dataset}/{subset}/evaluation_points_2017-2018.csv",
+        f"{EVAL_POINTS_DIR}/{dataset}/{subset}/evaluation_points_{year_pairs[0]}.csv",
+        f"{EVAL_POINTS_DIR}/{dataset}/{subset}/evaluation_points_{year_pairs[1]}.csv",
+        f"{EVAL_POINTS_DIR}/{dataset}/{subset}/evaluation_points_{year_pairs[2]}.csv",
     ]
     
-    methods = ["ours"]#, "vpr", "ours", "colmap", "icp", "buffer"]
+    methods = ["ours", "icp", "buffer", "novpr"]
     
     for method in methods:
             
         input_path = Path(f"{EVAL_POINTS_DIR}/{dataset}/{subset}/results/{method}")
         error_files = [
-            input_path / "reprojection_errors_evaluation_points_2016-2017.npy",
-            input_path / "reprojection_errors_evaluation_points_2016-2018.npy",
-            input_path / "reprojection_errors_evaluation_points_2017-2018.npy",
+            input_path / f"reprojection_errors_evaluation_points_{year_pairs[0]}.npy",
+            input_path / f"reprojection_errors_evaluation_points_{year_pairs[1]}.npy",
+            input_path / f"reprojection_errors_evaluation_points_{year_pairs[2]}.npy",
         ]
+        
+        print(f'Input path: {input_path}')
 
         histogram_path = input_path / "reprojection_error.png"
 

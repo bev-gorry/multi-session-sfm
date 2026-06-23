@@ -192,7 +192,8 @@ if __name__ == "__main__":
     rgb_path0 = Path(f'{VSLAMLAB_BENCHMARK}/{dataset}/{subset}/rgb_0')
     rgb_path1 = rgb_path0
     
-    csv_file = Path(f"{EVAL_POINTS_DIR}/{dataset}/{subset}/evaluation_points_2016-2017.csv")
+    ### IMPORTANT: change csv file name here to populate other years (2016-2017, 2018-2019, 2020-2021)
+    csv_file = Path(f"{EVAL_POINTS_DIR}/{dataset}/{subset}/evaluation_points_2016-2018.csv")
 
     # read csv file to get image pairs
     if not csv_file.exists():

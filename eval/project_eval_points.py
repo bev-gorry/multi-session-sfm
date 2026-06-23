@@ -67,8 +67,9 @@ def find_pid(uv_clicked, sift_kpts, img):
 
 if __name__ == "__main__":
     
-    METHOD = "OURS"   # 'ours' or 'colmap' or 'icp' or 'buffer' or 'vpr' or 'seq'
-    
+    year_pairs = ["2016-2017", "2016-2018", "2017-2018"]   # SESOKO
+    # year_pairs = ["2015-2016", "2015-2018", "2016-2018"]   # EIFFEL
+        
     parser = argparse.ArgumentParser(description="")
     parser.add_argument("--exp_yaml", type=str, default="arguments/exp_test.yaml", help="Path to experiment YAML file.")
     
@@ -76,36 +77,82 @@ if __name__ == "__main__":
     
     exp_name, dataset, subset, log_dir, dist_threshold = parse_yaml(args.exp_yaml)
     
+    if "ours" in exp_name.lower():
+        METHOD = "OURS"
+    elif "icp" in exp_name.lower():
+        METHOD = "ICP"
+    elif "buffer" in exp_name.lower():
+        METHOD = "BUFFER"
+    elif "novpr" in exp_name.lower():
+        METHOD = "NOVPR"
+    else:
+        print(f"⚠️  Unknown method in experiment name: {exp_name}. Please use 'ours', 'icp', or 'buffer'.")
+        exit(0)
+
     all_errors = []
     
-    csv_files = [
-        f"{EVAL_POINTS_DIR}/{dataset}/{subset}/evaluation_points_2016-2017.csv",
-        f"{EVAL_POINTS_DIR}/{dataset}/{subset}/evaluation_points_2016-2018.csv",
-        f"{EVAL_POINTS_DIR}/{dataset}/{subset}/evaluation_points_2017-2018.csv",
-    ]
-
-    if METHOD in ["OURS", "COLMAP", "VPR", "SEQ"]:
+    if METHOD in ["OURS", "NOVPR", "SEQ"]:
         model0 = Path(f'{VSLAMLAB_EVALUATION}/{exp_name}/{dataset}/{subset}/colmap_00000/0')
         model1 = model0
         
         rgb_path0 = Path(f'{VSLAMLAB_BENCHMARK}/{dataset}/{subset}/rgb_0')
         rgb_path1 = rgb_path0
+        
+        yellow_text = "\033[93m"
+        reset_text = "\033[0m"
+        print(f"{yellow_text}METHOD:   {METHOD}{reset_text}")
+        print(f"{yellow_text}MODEL:    {model0}{reset_text}")
+        print(f"{yellow_text}RGB PATH: {rgb_path0}{reset_text}")
+        confirm = input(f"Please confirm that the above paths are correct (Y/n): ").strip().lower()
+        if confirm not in ["", "y"]:
+            print("Exiting. Please edit the paths in the script and re-run.")
+            exit(0)
 
+        csv_files = [
+            Path(f"{EVAL_POINTS_DIR}/{dataset}/{subset}/evaluation_points_{year_pairs[0]}.csv"),
+            Path(f"{EVAL_POINTS_DIR}/{dataset}/{subset}/evaluation_points_{year_pairs[1]}.csv"),
+            Path(f"{EVAL_POINTS_DIR}/{dataset}/{subset}/evaluation_points_{year_pairs[2]}.csv"),
+        ]
+        
+        for path in [model0, rgb_path0, *csv_files]:
+            if not path.exists():
+                print(f"⚠️  Path does not exist: {path}")
+                exit(0)
+            
     if METHOD in ["BUFFER", "ICP"]:
-        if METHOD == "BUFFER":
-            folder = "BUFFER"
-        else:
-            folder = "COLMAP"
         
-        print(f"MODEL: {METHOD}, two models required. Evaluation not implemented yet. Exiting.")
-        exit(1)
+        # /media/beverley/beverley_t7/VSLAM-LAB-Evaluation/exp_sesoko_sskall_s05_icp/SESOKO/ssk18-s05/colmap_00000/0_transformed
+        yellow_text = "\033[93m"
+        reset_text = "\033[0m"
+        print(f"{yellow_text}METHOD: {METHOD}, two models required.{reset_text}")
+        sequence0 = input("Enter first sequence (e.g., ssk16-s05): ")
+        sequence1 = input("Enter second sequence (e.g., ssk17-s05): ")
+        model0 = Path(f'{VSLAMLAB_EVALUATION}/{exp_name}/{dataset}/{sequence0}/colmap_00000/0_transformed')
+        rgb_path0 = Path(f'{VSLAMLAB_BENCHMARK}/{dataset}/{sequence0}/rgb_0')
         
-        # model0 = Path(f'/media/beverley/beverley_t7/VSLAM-LAB-Evaluation/sangohenka/SESOKO/{folder}/ssk16-{subset}/colmap_00000/0_transformed')
-        # rgb_path0 = Path(f'/media/beverley/beverley_t7/SANGOHENKA-BENCHMARK/SESOKO/ssk16-{subset}/rgb_0')
+        model1 = Path(f'{VSLAMLAB_EVALUATION}/{exp_name}/{dataset}/{sequence1}/colmap_00000/0_transformed')
+        rgb_path1 = Path(f'{VSLAMLAB_BENCHMARK}/{dataset}/{sequence1}/rgb_0')
         
-        # model1 = Path(f'/media/beverley/beverley_t7/VSLAM-LAB-Evaluation/sangohenka/SESOKO/{folder}/ssk17-{subset}/colmap_00000/0_transformed')
-        # rgb_path1 = Path(f'/media/beverley/beverley_t7/SANGOHENKA-BENCHMARK/SESOKO/ssk17-{subset}/rgb_0')
-    
+        year1 = f"20{sequence0.split('-')[0][3:5]}"
+        year2 = f"20{sequence1.split('-')[0][3:5]}"
+        csv_files = [Path(f"{EVAL_POINTS_DIR}/{dataset}/{subset}/evaluation_points_{year1}-{year2}.csv")]
+        
+        print(f"{yellow_text}MODEL 0:    {model0}{reset_text}")
+        print(f"{yellow_text}RGB PATH 0: {rgb_path0}{reset_text}")
+        print(f"{yellow_text}MODEL 1:    {model1}{reset_text}")
+        print(f"{yellow_text}RGB PATH 1: {rgb_path1}{reset_text}")
+        print(f"{yellow_text}CSV FILES:  {csv_files}{reset_text}")
+        confirm = input(f"Please confirm that the above paths are correct (Y/n): ").strip().lower()
+        
+        if confirm not in ["", "y"]:
+            print("Exiting. Please edit the paths in the script and re-run.")
+            exit(0)
+        
+        for path in [model0, rgb_path0, model1, rgb_path1, *csv_files]:
+            if not path.exists():
+                print(f"⚠️  Path does not exist: {path}")
+                exit(0)
+
     # only use this method is evaluating a joint reconstruction (not ICP)
     for csv in csv_files:
         csv_file = Path(csv)

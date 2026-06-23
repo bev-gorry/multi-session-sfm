@@ -1,6 +1,6 @@
 from pathlib import Path
 
-EVAL_POINTS_DIR = Path("evaluation_points/")
+EVAL_POINTS_DIR = Path("output/")
 
 plotting_parameters = {
     'font_scale': 3,

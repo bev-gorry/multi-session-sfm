@@ -78,8 +78,8 @@ if __name__ == "__main__":
     error_candidates = [
         (input_path / "icp" / "reprojection_errors.npy", "COLMAP + ICP", yellow),
         (input_path / "buffer" / "reprojection_errors.npy", "COLMAP + BUFFER-X", blue),
-        (input_path / "ours" / "reprojection_errors.npy", "Ours", green),
-        (input_path / "vpr" / "reprojection_errors.npy", "Ours + VPR", pink),
+        (input_path / "novpr" / "reprojection_errors.npy", "Ours (Without VPR)", green),
+        (input_path / "ours" / "reprojection_errors.npy", "Ours", pink),
     ]
 
     histogram_path = input_path / f"{dataset.lower()}_{subset}_reprojection_error.png"
