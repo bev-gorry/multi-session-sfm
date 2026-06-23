@@ -60,6 +60,10 @@ if __name__ == "__main__":
     for method in methods:
             
         input_path = Path(f"{EVAL_POINTS_DIR}/{dataset}/{subset}/results/{method}")
+        
+        if not input_path.exists():
+            continue
+        
         error_files = [
             input_path / f"reprojection_errors_evaluation_points_{year_pairs[0]}.npy",
             input_path / f"reprojection_errors_evaluation_points_{year_pairs[1]}.npy",
