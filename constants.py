@@ -1,6 +1,6 @@
 from pathlib import Path
 
-EVAL_POINTS_DIR = Path("output/")
+EVAL_POINTS_DIR = Path("reprojection/")
 
 plotting_parameters = {
     'font_scale': 3,
