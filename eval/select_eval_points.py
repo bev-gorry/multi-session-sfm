@@ -194,6 +194,10 @@ if __name__ == "__main__":
     
     ### IMPORTANT: change csv file name here to populate other years (2016-2017, 2018-2019, 2020-2021)
     csv_file = Path(f"{EVAL_POINTS_DIR}/{dataset}/{subset}/evaluation_points_2016-2018.csv")
+    
+    yellow_text = "\033[93m"
+    reset_text = "\033[0m"
+    print(f"{yellow_text}CSV FILE: {csv_file}{reset_text}")
 
     # read csv file to get image pairs
     if not csv_file.exists():

@@ -67,8 +67,24 @@ def find_pid(uv_clicked, sift_kpts, img):
 
 if __name__ == "__main__":
     
-    year_pairs = ["2016-2017", "2016-2018", "2017-2018"]   # SESOKO
-    # year_pairs = ["2015-2016", "2015-2018", "2016-2018"]   # EIFFEL
+    yellow_text = "\033[93m"
+    reset_text = "\033[0m"
+    datasets = ["SESOKO", "EIFFEL"]
+    print(f"{yellow_text}Available datasets:")
+    for idx, name in enumerate(datasets, start=1):
+        print(f"  {idx}. {name}")
+    selection = input(f"Enter 1 or 2 to select a dataset: {reset_text}").strip()
+    try:
+        selection_idx = int(selection) - 1
+        dataset = datasets[selection_idx]
+    except (ValueError, IndexError):
+        print("Invalid dataset selection. Exiting...")
+        exit(1)
+
+    if dataset == "SESOKO":
+        year_pairs = ["2016-2017", "2016-2018", "2017-2018"]   # SESOKO
+    elif dataset == "EIFFEL":
+        year_pairs = ["2015-2016", "2015-2018", "2016-2018"]   # EIFFEL
         
     parser = argparse.ArgumentParser(description="")
     parser.add_argument("--exp_yaml", type=str, default="arguments/exp_test.yaml", help="Path to experiment YAML file.")
@@ -98,16 +114,6 @@ if __name__ == "__main__":
         rgb_path0 = Path(f'{VSLAMLAB_BENCHMARK}/{dataset}/{subset}/rgb_0')
         rgb_path1 = rgb_path0
         
-        yellow_text = "\033[93m"
-        reset_text = "\033[0m"
-        print(f"{yellow_text}METHOD:   {METHOD}{reset_text}")
-        print(f"{yellow_text}MODEL:    {model0}{reset_text}")
-        print(f"{yellow_text}RGB PATH: {rgb_path0}{reset_text}")
-        confirm = input(f"Please confirm that the above paths are correct (Y/n): ").strip().lower()
-        if confirm not in ["", "y"]:
-            print("Exiting. Please edit the paths in the script and re-run.")
-            exit(0)
-
         csv_files = [
             Path(f"{EVAL_POINTS_DIR}/{dataset}/{subset}/evaluation_points_{year_pairs[0]}.csv"),
             Path(f"{EVAL_POINTS_DIR}/{dataset}/{subset}/evaluation_points_{year_pairs[1]}.csv"),
@@ -118,6 +124,17 @@ if __name__ == "__main__":
             if not path.exists():
                 print(f"⚠️  Path does not exist: {path}")
                 exit(0)
+        
+        yellow_text = "\033[93m"
+        reset_text = "\033[0m"
+        print(f"{yellow_text}METHOD:    {METHOD}{reset_text}")
+        print(f"{yellow_text}MODEL:     {model0}{reset_text}")
+        print(f"{yellow_text}RGB PATH:  {rgb_path0}{reset_text}")
+        print(f"{yellow_text}CSV FILES: {csv_files}{reset_text}")
+        confirm = input(f"Please confirm that the above paths are correct (Y/n): ").strip().lower()
+        if confirm not in ["", "y"]:
+            print("Exiting. Please edit the paths in the script and re-run.")
+            exit(0)
             
     if METHOD in ["BUFFER", "ICP"]:
         
@@ -214,8 +231,12 @@ if __name__ == "__main__":
                     continue
                 
                 xyz = points3D0[pid].xyz
-                u_proj, v_proj = project_colmap_point(xyz, img1, camera1)
-                
+                uv_proj = project_colmap_point(xyz, img1, camera1)
+                if uv_proj is None:
+                    print(f"⚠️  Projection failed for point {pid} in image {img1_name}, skipping.")
+                    continue
+                u_proj, v_proj = uv_proj
+
                 # exclude out-of-bounds points (comment this out if you want to include them)
                 # if u_proj < 0 or u_proj >= w1 or v_proj < 0 or v_proj >= h1:
                 #     print(f"⚠️  Transformed point ({u_proj:.2f}, {v_proj:.2f}) is out of bounds for image size ({w1}, {h1}). Skipping.")

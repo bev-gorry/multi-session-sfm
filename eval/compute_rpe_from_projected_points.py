@@ -37,8 +37,25 @@ grey   = [c / 255.0 for c in GREY]
 
 if __name__ == "__main__":
     
-    year_pairs = ["2016-2017", "2016-2018", "2017-2018"]   # SESOKO
-    # year_pairs = ["2015-2016", "2015-2018", "2016-2018"]   # EIFFEL
+    yellow_text = "\033[93m"
+    reset_text = "\033[0m"
+    datasets = ["SESOKO", "EIFFEL"]
+    print(f"{yellow_text}Available datasets:")
+    for idx, name in enumerate(datasets, start=1):
+        print(f"  {idx}. {name}")
+    selection = input(f"Enter 1 or 2 to select a dataset: {reset_text}").strip()
+    try:
+        selection_idx = int(selection) - 1
+        dataset = datasets[selection_idx]
+    except (ValueError, IndexError):
+        print("Invalid dataset selection. Exiting...")
+        exit(1)
+    
+    if dataset == "SESOKO":
+        year_pairs = ["2016-2017", "2016-2018", "2017-2018"]   # SESOKO
+    elif dataset == "EIFFEL":
+        year_pairs = ["2015-2016", "2015-2018", "2016-2018"]   # EIFFEL
+    
 
     parser = argparse.ArgumentParser(description="")
     parser.add_argument("--exp_yaml", type=str, default="arguments/exp_test.yaml", help="Path to experiment YAML file.")
