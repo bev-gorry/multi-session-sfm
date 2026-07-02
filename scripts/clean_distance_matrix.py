@@ -23,6 +23,11 @@ def main():
     matrix_path = f"{log_dir}/D.npy"
     rgb_csv = f"{log_dir}/rgb.csv"
     
+    # Remove other distance matrices
+    matrix_dir = Path(matrix_path).parent
+    for file in matrix_dir.glob("D_*.npy"):
+            file.unlink()
+    
     # Load matrix
     D = np.load(matrix_path)
     
@@ -59,6 +64,8 @@ def main():
     ax_main.xaxis.set_label_position('top')
     
     plt.show()
+    
+    
 
 if __name__ == "__main__":
     main()

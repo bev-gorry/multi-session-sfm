@@ -1,4 +1,4 @@
-### Take image pair and combined model. For each clicked 2D point in image0, transform it to image 1 using homography.
+### Take image pair and combined model. For each clicked 2D point in image0, transform it to image 1 using the fundamental matrix.
 ### Viewing the points on image1 click on a corresponding keypoint and click a new location to move / correct it.
 ### Write img0 (string), img1 (string), uv_clicked (list of pairs), uv_groundtruth (list of pairs) to csv.
 
@@ -86,7 +86,7 @@ class PointEditor:
         # reset
         self.active_idx = None
 
-def compute_homography(path_0, path_1):
+def compute_fundamental_matrix(path_0, path_1):
     feats_dict0, feats_rot0, h0, w0 = extract_keypoints(path_0, features="superpoint")
     feats_dict1, feats_rot1, h1, w1 = extract_keypoints(path_1, features="superpoint")
     
@@ -108,9 +108,28 @@ def compute_homography(path_0, path_1):
     pts0 = pts0[matches_tensor[:,0]]
     pts1 = pts1[matches_tensor[:,1]]
 
-    H, inlier_mask = cv2.findHomography(pts0, pts1, cv2.RANSAC, 5.0)
-        
-    return H, inlier_mask, pts0, pts1
+    F, inlier_mask = cv2.findFundamentalMat(pts0, pts1, cv2.FM_RANSAC, 5.0)
+
+    if F is None:
+        raise RuntimeError("cv2.findFundamentalMat failed; not enough good matches or points are degenerate.")
+
+    return F, inlier_mask, pts0, pts1
+
+def transfer_point_with_fundamental(F, u_clicked, v_clicked, w1, h1):
+    pt0 = np.array([[[u_clicked, v_clicked]]], dtype=np.float32)
+    line = cv2.computeCorrespondEpilines(pt0, 1, F)[0, 0]
+    a, b, c = line
+
+    cx, cy = w1 / 2.0, h1 / 2.0
+    denom = a * a + b * b
+    if denom == 0:
+        return cx, cy
+
+    # Closest point on the epipolar line to the image center.
+    t = (a * cx + b * cy + c) / denom
+    u_gt = cx - a * t
+    v_gt = cy - b * t
+    return u_gt, v_gt
 
 def plot_warped_image(H, inliers, pts0, pts1, path_to_image0, path_to_image1, fig, ax, uv_projected=None, uv_groundtruth=None):
 
@@ -193,7 +212,7 @@ if __name__ == "__main__":
     rgb_path1 = rgb_path0
     
     ### IMPORTANT: change csv file name here to populate other years (2016-2017, 2018-2019, 2020-2021)
-    csv_file = Path(f"{EVAL_POINTS_DIR}/{dataset}/{subset}/evaluation_points_2016-2018.csv")
+    csv_file = Path(f"{EVAL_POINTS_DIR}/{dataset}/{subset}/evaluation_points_2015-2016.csv")
     
     yellow_text = "\033[93m"
     reset_text = "\033[0m"
@@ -233,7 +252,7 @@ if __name__ == "__main__":
         camera1 = cameras1[img1.camera_id]
         h1, w1 = camera1.height, camera1.width
     
-        H, inlier_mask, pts0_H, pts1_H = compute_homography(path_0, path_1)
+        F, inlier_mask, pts0_H, pts1_H = compute_fundamental_matrix(path_0, path_1)
         
         # show images to help with kpt selection
         image0 = cv2.cvtColor(cv2.imread(str(path_0)), cv2.COLOR_BGR2RGB)
@@ -251,9 +270,8 @@ if __name__ == "__main__":
                 print(f"⚠️  No 3D point found for clicked point ({u_clicked:.2f}, {v_clicked:.2f}). Skipping.")
                 continue
 
-            # transform clicked point using homography
-            pt = np.array([[[u_clicked, v_clicked]]], dtype=np.float32)
-            u_gt, v_gt = cv2.perspectiveTransform(pt, H)[0, 0]
+            # transform clicked point using the fundamental matrix (epipolar transfer)
+            u_gt, v_gt = transfer_point_with_fundamental(F, u_clicked, v_clicked, w1, h1)
             
             # ignore points that transform out of image bounds because we cannot correct them
             if u_gt < 0 or u_gt >= w1 or v_gt < 0 or v_gt >= h1:

@@ -34,6 +34,7 @@ tqdm = "*"
 pytorch-gpu = "*"
 torchvision = ">=0.3"
 huggingface_hub = ">=1.18.0,<2"
+open3d = ">=0.19.0"
 
 [feature.pipeline.system-requirements]
 cuda = "12.0"

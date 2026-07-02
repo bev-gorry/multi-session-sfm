@@ -10,13 +10,15 @@ import pandas as pd
 from PIL import Image
 from tqdm import tqdm
 
-
+yellow_text = "\033[93m"
+reset_text = "\033[0m"
 
 EIFFEL_SEQUENCES = {
     "eff15": "https://www.seanoe.org/data/00810/92226/data/98240.zip",
     "eff16": "https://www.seanoe.org/data/00810/92226/data/98289.zip",
     "eff18": "https://www.seanoe.org/data/00810/92226/data/98314.zip",
     "eff20": "https://www.seanoe.org/data/00810/92226/data/98356.zip",
+    # "global": "https://www.seanoe.org/data/00810/92226/data/98357.zip",
 }
 
 R = 6378137.0  # WGS84
@@ -48,7 +50,6 @@ def download_zip(dataset_path: Path, url: str):
 def unzip_and_normalize(zip_path: Path, dataset_path: Path):
     print(f"[↧] Unzipping {zip_path.name}")
     shutil.unpack_archive(str(zip_path), str(dataset_path))
-    zip_path.unlink()
 
     # Find extracted folder (usually numeric or year-like)
     candidates = [p for p in dataset_path.iterdir() if p.is_dir()]
@@ -116,15 +117,11 @@ def validate_consistency(df, rgb_dir: Path):
     extra_imgs = img_set - nav_set
 
     if missing_imgs:
-        raise RuntimeError(f"Missing images in rgb_0: {list(missing_imgs)[:10]}")
+        print(f"{yellow_text}Missing images in rgb_0: {list(missing_imgs)[:10]}{reset_text}")
 
     if extra_imgs:
-        raise RuntimeError(f"Extra images not in navigation.txt: {list(extra_imgs)[:10]}")
+        print(f"{yellow_text}Extra images not in navigation.txt: {list(extra_imgs)[:10]}{reset_text}")
 
-
-# =======================================================
-# GLOBAL FRAME (eff15 reference)
-# =======================================================
 
 def compute_enu(df, ref_df):
     ref = ref_df.iloc[0]
@@ -166,12 +163,13 @@ def write_rgb(seq_path: Path, df):
 
     with open(out, "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["ts_rgb_0 (ns)", "path_rgb_0"])
+        w.writerow(["ts_rgb_0 (ns)", "path_rgb_0", "sequence_name"])
 
         for _, row in df.iterrows():
             w.writerow([
                 int(row["timestamp_ns"]),
-                f"rgb_0/{row['name']}"
+                f"rgb_0/{row['name']}",
+                seq_path.name
             ])
 
     print(f"[✓] rgb.csv -> {out}")
@@ -236,7 +234,7 @@ def process_sequence(seq_path: Path, ref_nav):
 # =======================================================
 
 def main():
-    dataset_root = Path("/media/beverley/beverley_t7/SANGOHENKA-BENCHMARK/EIFFEL_TEST")
+    dataset_root = Path("/media/beverley/beverley_t7/SANGOHENKA-BENCHMARK/EIFFEL_ZIP")
     dataset_root.mkdir(parents=True, exist_ok=True)
 
     # download + extract

@@ -15,12 +15,15 @@ from utilities import parse_yaml
 def main():
     parser = argparse.ArgumentParser(description="")
     parser.add_argument("--exp_yaml", type=str, default="arguments/exp_test.yaml", help="Path to experiment YAML file.")
+    parser.add_argument("--max_rgb", type=int, default=3000, help="Maximum number of RGB images to consider.")
     # parser.add_argument("--threshold", type=float, help="Threshold between 0 and 1")
     
     args = parser.parse_args()
     
     _, _, _, log_dir, dist_thresh = parse_yaml(args.exp_yaml)
     matrix_path = f"{log_dir}/D_cleaned.npy"
+    
+    max_rgb = args.max_rgb
 
     # dist_thresh = args.threshold
     
@@ -40,7 +43,10 @@ def main():
     D_binary[np.isfinite(D_binary)] = 1
     
     # Count pairs below threshold
-    count = np.sum(D_thresholded <= dist_thresh)
+    count = int(np.sum(D_thresholded <= dist_thresh))
+    if max_rgb is not None and count > max_rgb:
+        print(f"WARNING: Found {count} pairs below threshold but max_rgb is set to {max_rgb}. Capping count to {max_rgb} due to subsampling.")
+        count = int(max_rgb)
     
     # Estimate the time taken to do feature matching for all pairs below threshold
     # Assuming 0.1 seconds per pair (this is just an example, actual time may vary based on hardware and implementation)
