@@ -1,5 +1,5 @@
-exp_sesoko_sskall_s05:
-  Config: test_config_rss_ssk_05.yaml
+exp_test_ours:
+  Config: config_ssk05_ours.yaml
   NumRuns: 1
   Parameters: {matcher_type: custom, verbose: 0}
   Module: glomap

@@ -15,7 +15,7 @@ from utilities import parse_yaml
 def main():
     parser = argparse.ArgumentParser(description="")
     parser.add_argument("--exp_yaml", type=str, default="arguments/exp_test.yaml", help="Path to experiment YAML file.")
-    parser.add_argument("--max_rgb", type=int, default=3000, help="Maximum number of RGB images to consider.")
+    parser.add_argument("--max_rgb", type=int, default=None, help="Maximum number of RGB images to consider. If not set, no cap is applied.")
     # parser.add_argument("--threshold", type=float, help="Threshold between 0 and 1")
     
     args = parser.parse_args()
@@ -49,7 +49,7 @@ def main():
         count = int(max_rgb)
     
     # Estimate the time taken to do feature matching for all pairs below threshold
-    # Assuming 0.1 seconds per pair (this is just an example, actual time may vary based on hardware and implementation)
+    # Assuming 0.05 seconds per pair (this is just an example, actual time may vary based on hardware and implementation)
     time_per_pair = 0.05
     total_time_seconds = (count/2) * time_per_pair
     total_time_minutes = total_time_seconds / 3600

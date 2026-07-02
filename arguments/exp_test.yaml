@@ -1,18 +1,15 @@
 %YAML 1.2
 ---
 
-exp_name: exp_sesoko_sskall_s05
+exp_name: exp_test_ours
 dataset: SESOKO
 subset: sskall-s05
 
 # VPR-LAB
-log_dir: "baselines/VSLAM-LAB-Benchmark/SESOKO/sskall-s05"
+log_dir: "/media/beverley/beverley_t7/SANGOHENKA-BENCHMARK/SESOKO/sskall-s05"
 
-rgb_list_db: "baselines/VSLAM-LAB-Benchmark/SESOKO/sskall-s05/rgb.csv"
-rgb_list_q: "baselines/VSLAM-LAB-Benchmark/SESOKO/sskall-s05/rgb.csv"
+rgb_list_db: "/media/beverley/beverley_t7/SANGOHENKA-BENCHMARK/SESOKO/sskall-s05/rgb.csv"
+rgb_list_q: "/media/beverley/beverley_t7/SANGOHENKA-BENCHMARK/SESOKO/sskall-s05/rgb.csv"
 
 # DISTANCE MATRIX
-dist_threshold: 0.6
-
-# VSLAM-LAB exp
-# vslam_lab_exp: exp_test_vslamlab.yaml
+dist_threshold: 0.5
