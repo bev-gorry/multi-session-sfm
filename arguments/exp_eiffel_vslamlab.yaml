@@ -1,5 +1,0 @@
-exp_eiffel_effthree_s10_hpc:
-  Config: test_config_eiffel.yaml
-  NumRuns: 1
-  Parameters: {matcher_type: custom, verbose: 0}
-  Module: glomap

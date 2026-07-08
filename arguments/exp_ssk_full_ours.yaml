@@ -1,0 +1,15 @@
+%YAML 1.2
+---
+
+exp_name: exp_ssk_full_ours
+dataset: SESOKO
+subset: sskall-full
+
+# VPR-LAB
+log_dir: "/media/beverley/beverley_t7/SANGOHENKA-BENCHMARK/SESOKO/sskall-full"
+
+rgb_list_db: "/media/beverley/beverley_t7/SANGOHENKA-BENCHMARK/SESOKO/sskall-full/rgb.csv"
+rgb_list_q: "/media/beverley/beverley_t7/SANGOHENKA-BENCHMARK/SESOKO/sskall-full/rgb.csv"
+
+# DISTANCE MATRIX
+dist_threshold: 0.5

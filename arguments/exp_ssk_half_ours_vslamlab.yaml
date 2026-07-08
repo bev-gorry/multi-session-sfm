@@ -1,0 +1,5 @@
+exp_ssk_half_ours:
+  Config: config_ssk_half_ours.yaml
+  NumRuns: 1
+  Parameters: {matcher_type: custom, verbose: 0, step_size: 1}
+  Module: glomap
