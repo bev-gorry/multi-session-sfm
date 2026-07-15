@@ -50,14 +50,16 @@ def main():
     
     # Estimate the time taken to do feature matching for all pairs below threshold
     # Assuming 0.05 seconds per pair (this is just an example, actual time may vary based on hardware and implementation)
-    time_per_pair = 0.05
-    total_time_seconds = (count/2) * time_per_pair
-    total_time_minutes = total_time_seconds / 3600
+    time_per_pair_pc = 0.05
+    time_per_pair_hpc = 0.15
+    total_time_pc_hrs = (count/2) * time_per_pair_pc / 3600
+    total_time_hpc_hrs = (count/2) * time_per_pair_hpc / 3600
 
     print(f"Matrix shape: {D.shape}")
     print(f"Threshold: {dist_thresh}")
     print(f"Pairs with distance <= threshold (accounting for symmetry): {count/2}")
-    print(f"Estimated time for feature matching: {total_time_minutes:.2f} hours")
+    print(f"Time per pair (PC): {time_per_pair_pc} s // Time per pair (HPC): {time_per_pair_hpc} s")
+    print(f"Estimated time for feature matching: {total_time_pc_hrs:.2f} hours (PC) // {total_time_hpc_hrs:.2f} hours (HPC)")
     
     # Save binary matrix
     # np.save(f"{Path(matrix_path).parent}/D_binary_{dist_thresh}.npy", D_binary)
