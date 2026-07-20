@@ -22,7 +22,7 @@ sys.path.append(root)
 from baselines.VSLAM_LAB.path_constants import VSLAMLAB_BENCHMARK, VSLAMLAB_EVALUATION
 from baselines.VSLAM_LAB.Baselines.colmap.scripts.python.read_write_model import read_model
 from baselines.VSLAM_LAB.Baselines.LightGlue.lightglue import LightGlue, SuperPoint
-from utilities import parse_yaml, get_colmap_image_by_name, unrotate_kps_W, extract_keypoints, feature_matching, show_image_with_clickable_points, plot_kpts_on_image_pair
+from utilities import parse_yaml, get_colmap_image_by_name, unrotate_kps_W, extract_keypoints, feature_matching, show_image_with_clickable_points, plot_kpts_on_image_pair, get_pair_colors
 from constants import EVAL_POINTS_DIR
 
 BLUE = [106, 178, 212]
@@ -36,21 +36,35 @@ pink   = [c / 255.0 for c in PINK]
 grey   = [c / 255.0 for c in GREY]
 
 class PointEditor:
-    def __init__(self, ax, points, select_radius=12):
+    def __init__(self, ax, points, colors, select_radius=12):
+
         self.ax = ax
         self.points = points
+        self.colors = colors
         self.active_idx = None
         self.select_radius = select_radius
 
         self.scatter = ax.scatter(
-            points[:, 0],
-            points[:, 1],
-            c='green',
-            s=120,
-            marker='o',
-            edgecolors='white'
+            points[:,0],
+            points[:,1],
+            c=colors,
+            s=150,
+            edgecolors="white",
         )
+    # def __init__(self, ax, points, select_radius=12):
+    #     self.ax = ax
+    #     self.points = points
+    #     self.active_idx = None
+    #     self.select_radius = select_radius
 
+    #     self.scatter = ax.scatter(
+    #         points[:, 0],
+    #         points[:, 1],
+    #         c='green',
+    #         s=120,
+    #         marker='o',
+    #         edgecolors='white'
+    #     )
         fig = ax.figure
         fig.canvas.mpl_connect("button_press_event", self.on_click)
 
@@ -208,11 +222,15 @@ if __name__ == "__main__":
     model0 = Path(f'{VSLAMLAB_EVALUATION}/{exp_name}/{dataset}/{subset}/colmap_00000/0')
     model1 = model0
     
+    # MANUAL TO COVER THE MISSING IMAGES DUE TO STEP SIZE OFFSET
+    # model0 = Path(f'{VSLAMLAB_EVALUATION}/{exp_name}/{dataset}/eff18-full/colmap_00000/0_transformed')
+    # model1 = Path(f'{VSLAMLAB_EVALUATION}/{exp_name}/{dataset}/eff20-full/colmap_00000/0_transformed')
+    
     rgb_path0 = Path(f'{VSLAMLAB_BENCHMARK}/{dataset}/{subset}/rgb_0')
     rgb_path1 = rgb_path0
     
     ### IMPORTANT: change csv file name here to populate other years (2016-2017, 2018-2019, 2020-2021)
-    csv_file = Path(f"{EVAL_POINTS_DIR}/{dataset}/{subset}/evaluation_points_2015-2016.csv")
+    csv_file = Path(f"{EVAL_POINTS_DIR}/{dataset}/{subset}/evaluation_points_2018-2020.csv")
     
     yellow_text = "\033[93m"
     reset_text = "\033[0m"
@@ -241,65 +259,93 @@ if __name__ == "__main__":
         if is_populated(row.get("uv_clicked")):
             print(f"[SKIP] Row {idx} already populated.")
             continue
-        img0_name = row['img0']
-        img1_name = row['img1']
         
-        path_0 = Path(rgb_path0 / img0_name)
-        path_1 = Path(rgb_path1 / img1_name)
+        try: 
+            img0_name = row['img0']
+            img1_name = row['img1']
+            
+            path_0 = Path(rgb_path0 / img0_name)
+            path_1 = Path(rgb_path1 / img1_name)
 
-        img0 = get_colmap_image_by_name(images0, img0_name)
-        img1 = get_colmap_image_by_name(images1, img1_name)
-        camera1 = cameras1[img1.camera_id]
-        h1, w1 = camera1.height, camera1.width
-    
-        F, inlier_mask, pts0_H, pts1_H = compute_fundamental_matrix(path_0, path_1)
-        
-        # show images to help with kpt selection
-        image0 = cv2.cvtColor(cv2.imread(str(path_0)), cv2.COLOR_BGR2RGB)
-        image1 = cv2.cvtColor(cv2.imread(str(path_1)), cv2.COLOR_BGR2RGB)
-        plot_kpts_on_image_pair(image0, image1, None, None, None)
-
-        # get keypoints from the first image andlookup its corresponding 3D point
-        results = show_image_with_clickable_points(path_0, img0)
-        
-        uv_clicked = []
-        uv_groundtruth = []
-        for result in results:
-            u_clicked, v_clicked, pid = result['u'], result['v'], result['pid']
-            if pid == -1:
-                print(f"⚠️  No 3D point found for clicked point ({u_clicked:.2f}, {v_clicked:.2f}). Skipping.")
+            img0 = get_colmap_image_by_name(images0, img0_name)
+            img1 = get_colmap_image_by_name(images1, img1_name)
+            
+            if img0 is None:
+                print(f"[ERROR] Could not find '{img0_name}' in COLMAP model. Skipping.")
                 continue
 
-            # transform clicked point using the fundamental matrix (epipolar transfer)
-            u_gt, v_gt = transfer_point_with_fundamental(F, u_clicked, v_clicked, w1, h1)
-            
-            # ignore points that transform out of image bounds because we cannot correct them
-            if u_gt < 0 or u_gt >= w1 or v_gt < 0 or v_gt >= h1:
-                print(f"⚠️  Transformed point ({u_gt:.2f}, {v_gt:.2f}) is out of bounds for image size ({w1}, {h1}). Skipping.")
+            if img1 is None:
+                print(f"[ERROR] Could not find '{img1_name}' in COLMAP model. Skipping.")
                 continue
-            
-            uv_clicked.append([u_clicked, v_clicked])
-            uv_groundtruth.append([float(u_gt), float(v_gt)])
 
-        if not uv_clicked:
-            print(f"[SKIP] No valid points clicked for row {idx}. Continuing.")
+            camera1 = cameras1[img1.camera_id]
+            h1, w1 = camera1.height, camera1.width
+        
+            F, inlier_mask, pts0_H, pts1_H = compute_fundamental_matrix(path_0, path_1)
+            
+            # show images to help with kpt selection
+            image0 = cv2.cvtColor(cv2.imread(str(path_0)), cv2.COLOR_BGR2RGB)
+            image1 = cv2.cvtColor(cv2.imread(str(path_1)), cv2.COLOR_BGR2RGB)
+            plot_kpts_on_image_pair(image0, image1, None, None, None)
+
+            # get keypoints from the first image andlookup its corresponding 3D point
+            results = show_image_with_clickable_points(path_0, img0)
+            
+            uv_clicked = []
+            uv_groundtruth = []
+            for result in results:
+                u_clicked, v_clicked, pid = result['u'], result['v'], result['pid']
+                if pid == -1:
+                    print(f"⚠️  No 3D point found for clicked point ({u_clicked:.2f}, {v_clicked:.2f}). Skipping.")
+                    continue
+
+                # transform clicked point using the fundamental matrix (epipolar transfer)
+                u_gt, v_gt = transfer_point_with_fundamental(F, u_clicked, v_clicked, w1, h1)
+                
+                # ignore points that transform out of image bounds because we cannot correct them
+                if u_gt < 0 or u_gt >= w1 or v_gt < 0 or v_gt >= h1:
+                    print(f"⚠️  Transformed point ({u_gt:.2f}, {v_gt:.2f}) is out of bounds for image size ({w1}, {h1}). Skipping.")
+                    continue
+                
+                uv_clicked.append([u_clicked, v_clicked])
+                uv_groundtruth.append([float(u_gt), float(v_gt)])
+
+            if not uv_clicked:
+                print(f"[SKIP] No valid points clicked for row {idx}. Continuing.")
+                continue
+
+            # fig, axs = plot_warped_image(H, inlier_mask, pts0_H, pts1_H, str(path_0), str(path_1), fig=None, ax=plt.gca(), uv_projected=None, uv_groundtruth=np.array(uv_groundtruth))
+        
+            uv_gt_np = np.array(uv_groundtruth, dtype=np.float32)
+        
+            # manually correct groundtruth
+            colors = get_pair_colors(len(uv_clicked))
+
+            _, axs = plot_kpts_on_image_pair(
+                image0,
+                image1,
+                uv_clicked,
+                None,
+                None
+            )
+            editor = PointEditor(axs[1], uv_gt_np, colors)
+            
+            plt.show()
+        
+            uv_groundtruth = uv_gt_np.tolist()
+            
+            df.loc[idx, "uv_clicked"] = json.dumps(uv_clicked)
+            df.loc[idx, "uv_groundtruth"] = json.dumps(uv_groundtruth)
+            
+            print(f"[✅] Updated row {idx}: {img0_name} -> {img1_name}")
+            df.to_csv(csv_file, index=False)
+            print(f"[💾] Saved progress to {csv_file}")
+        
+        except Exception as e:
+            print(f"Failed on row {idx}: {e}")
+            df.to_csv(csv_file, index=False)
+            print(f"[💾] Saved progress to {csv_file}")
             continue
-
-        # fig, axs = plot_warped_image(H, inlier_mask, pts0_H, pts1_H, str(path_0), str(path_1), fig=None, ax=plt.gca(), uv_projected=None, uv_groundtruth=np.array(uv_groundtruth))
-    
-        uv_gt_np = np.array(uv_groundtruth, dtype=np.float32)
-    
-        # manually correct groundtruth
-        _, axs = plot_kpts_on_image_pair(image0, image1, uv_clicked, None, None)
-        editor = PointEditor(axs[1], uv_gt_np)
-        plt.show()
-    
-        uv_groundtruth = uv_gt_np.tolist()
         
-        df.loc[idx, "uv_clicked"] = json.dumps(uv_clicked)
-        df.loc[idx, "uv_groundtruth"] = json.dumps(uv_groundtruth)
-        
-        print(f"[✅] Updated row {idx}: {img0_name} -> {img1_name}")
-    
     df.to_csv(csv_file, index=False)
     print(f"\n[💾] Updated CSV saved: {csv_file}")

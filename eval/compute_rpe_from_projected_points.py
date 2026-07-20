@@ -39,23 +39,6 @@ if __name__ == "__main__":
     
     yellow_text = "\033[93m"
     reset_text = "\033[0m"
-    datasets = ["SESOKO", "EIFFEL"]
-    print(f"{yellow_text}Available datasets:")
-    for idx, name in enumerate(datasets, start=1):
-        print(f"  {idx}. {name}")
-    selection = input(f"Enter 1 or 2 to select a dataset: {reset_text}").strip()
-    try:
-        selection_idx = int(selection) - 1
-        dataset = datasets[selection_idx]
-    except (ValueError, IndexError):
-        print("Invalid dataset selection. Exiting...")
-        exit(1)
-    
-    if dataset == "SESOKO":
-        year_pairs = ["2016-2017", "2016-2018", "2017-2018"]   # SESOKO
-    elif dataset == "EIFFEL":
-        year_pairs = ["2015-2016", "2015-2018", "2016-2018"]   # EIFFEL
-    
 
     parser = argparse.ArgumentParser(description="")
     parser.add_argument("--exp_yaml", type=str, default="arguments/exp_test.yaml", help="Path to experiment YAML file.")
@@ -64,12 +47,17 @@ if __name__ == "__main__":
     
     exp_name, dataset, subset, log_dir, dist_threshold = parse_yaml(args.exp_yaml)
     
+    if dataset == "SESOKO":
+        year_pairs = ["2016-2017"]#, "2016-2018", "2017-2018"]   # SESOKO
+    elif dataset == "EIFFEL":
+        # year_pairs = ["2016-2018", "2018-2020", "2016-2020"]   # EIFFEL
+        year_pairs = ["2018-2020"]   # EIFFEL
+
     all_errors = []
     
     csv_files = [
-        f"{EVAL_POINTS_DIR}/{dataset}/{subset}/evaluation_points_{year_pairs[0]}.csv",
-        f"{EVAL_POINTS_DIR}/{dataset}/{subset}/evaluation_points_{year_pairs[1]}.csv",
-        f"{EVAL_POINTS_DIR}/{dataset}/{subset}/evaluation_points_{year_pairs[2]}.csv",
+        Path(f"{EVAL_POINTS_DIR}/{dataset}/{subset}/evaluation_points_{year_pair}.csv")
+        for year_pair in year_pairs
     ]
     
     methods = ["ours", "icp", "buffer", "novpr"]
@@ -82,9 +70,8 @@ if __name__ == "__main__":
             continue
         
         error_files = [
-            input_path / f"reprojection_errors_evaluation_points_{year_pairs[0]}.npy",
-            input_path / f"reprojection_errors_evaluation_points_{year_pairs[1]}.npy",
-            input_path / f"reprojection_errors_evaluation_points_{year_pairs[2]}.npy",
+            Path(input_path / f"reprojection_errors_evaluation_points_{year_pair}.npy")
+            for year_pair in year_pairs
         ]
         
         print(f'Input path: {input_path}')
