@@ -23,7 +23,7 @@ sys.path.append(root)
 
 from baselines.VSLAM_LAB.path_constants import VSLAMLAB_BENCHMARK, VSLAMLAB_EVALUATION
 from baselines.VSLAM_LAB.Baselines.colmap.scripts.python.read_write_model import read_model
-from utilities import parse_yaml, get_colmap_image_by_name, project_colmap_point, plot_kpts_on_image_pair, plot_rpe_hist
+from utilities import parse_yaml, get_colmap_image_by_name, project_colmap_point, plot_kpts_on_image_pair, plot_rpe_hist, get_pair_colors
 from constants import plotting_parameters, EVAL_POINTS_DIR
 
 plt.rcParams.update({
@@ -60,8 +60,8 @@ def find_pid(uv_clicked, sift_kpts, img):
     for (i, sift_kpt) in enumerate(sift_kpts):
         u_sift, v_sift = sift_kpt
         dist = sqrt((u_sift - uv_clicked[0]) ** 2 + (v_sift - uv_clicked[1]) ** 2)
-        if dist == 0:
-            best_pid = img.point3D_ids[i]
+        if dist == 0 and img.point3D_ids[i] != -1:
+            return img.point3D_ids[i]
     return best_pid
 
 
@@ -208,7 +208,10 @@ if __name__ == "__main__":
             sift_kpts = img0.xys 
             # print(sift_kpts)
             
+            uv_clicked_valid = []
+            uv_gt_valid = []
             uv_projected = []
+            uv_backproject = []
             for click, groundtruth in zip(uv_clicked, uv_gt):
                 u_clicked, v_clicked = click
                 u_gt, v_gt = groundtruth
@@ -231,7 +234,14 @@ if __name__ == "__main__":
                 #     print(f"⚠️  Transformed point ({u_proj:.2f}, {v_proj:.2f}) is out of bounds for image size ({w1}, {h1}). Skipping.")
                 #     continue
                 
+                uv_backproj = project_colmap_point(xyz, img0, cameras0[img0.camera_id])
+                u_back, v_back = uv_backproj
+                uv_backproject.append([u_back, v_back])
+                
+                uv_clicked_valid.append(click)
+                uv_gt_valid.append(groundtruth)
                 uv_projected.append([u_proj, v_proj])
+                
                 reprojection_error = sqrt((u_proj - u_gt) ** 2 + (v_proj - v_gt) ** 2)
                 reprojection_errors.append(reprojection_error)
             
@@ -239,7 +249,17 @@ if __name__ == "__main__":
             image0 = cv2.cvtColor(cv2.imread(str(path_0)), cv2.COLOR_BGR2RGB)
             image1 = cv2.cvtColor(cv2.imread(str(path_1)), cv2.COLOR_BGR2RGB)
 
-            fig, axs = plot_kpts_on_image_pair(image0, image1, uv_clicked, uv_gt, uv_projected)
+            colors = get_pair_colors(len(uv_clicked_valid))
+            
+            fig, axs = plot_kpts_on_image_pair(
+                image0,
+                image1,
+                np.asarray(uv_clicked_valid),
+                np.asarray(uv_gt_valid),
+                np.asarray(uv_projected),
+                np.asarray(uv_backproject),
+                colors=colors,
+            )
             fig.savefig(evaluation_dir / f"reprojection_{idx:03d}_{img0_name[:-4]}_to_{img1_name[:-4]}.png", bbox_inches="tight", dpi=300)
             # fig.savefig(evaluation_dir / f"reprojection_{idx:03d}_{img0_name[:-4]}_to_{img1_name[:-4]}.pdf", bbox_inches="tight", dpi=300)
             plt.close(fig)
