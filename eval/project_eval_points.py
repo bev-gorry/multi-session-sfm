@@ -23,7 +23,7 @@ sys.path.append(root)
 
 from baselines.VSLAM_LAB.path_constants import VSLAMLAB_BENCHMARK, VSLAMLAB_EVALUATION
 from baselines.VSLAM_LAB.Baselines.colmap.scripts.python.read_write_model import read_model
-from utilities import parse_yaml, get_colmap_image_by_name, project_colmap_point, plot_kpts_on_image_pair, plot_rpe_hist
+from utilities import parse_yaml, get_colmap_image_by_name, project_colmap_point, plot_kpts_on_image_pair, plot_rpe_hist, get_pair_colors, get_observation_in_image
 from constants import plotting_parameters, EVAL_POINTS_DIR
 
 plt.rcParams.update({
@@ -60,8 +60,8 @@ def find_pid(uv_clicked, sift_kpts, img):
     for (i, sift_kpt) in enumerate(sift_kpts):
         u_sift, v_sift = sift_kpt
         dist = sqrt((u_sift - uv_clicked[0]) ** 2 + (v_sift - uv_clicked[1]) ** 2)
-        if dist == 0:
-            best_pid = img.point3D_ids[i]
+        if dist == 0 and img.point3D_ids[i] != -1:
+            return img.point3D_ids[i]
     return best_pid
 
 
@@ -69,29 +69,19 @@ if __name__ == "__main__":
     
     yellow_text = "\033[93m"
     reset_text = "\033[0m"
-    datasets = ["SESOKO", "EIFFEL"]
-    print(f"{yellow_text}Available datasets:")
-    for idx, name in enumerate(datasets, start=1):
-        print(f"  {idx}. {name}")
-    selection = input(f"Enter 1 or 2 to select a dataset: {reset_text}").strip()
-    try:
-        selection_idx = int(selection) - 1
-        dataset = datasets[selection_idx]
-    except (ValueError, IndexError):
-        print("Invalid dataset selection. Exiting...")
-        exit(1)
 
-    if dataset == "SESOKO":
-        year_pairs = ["2016-2017", "2016-2018", "2017-2018"]   # SESOKO
-    elif dataset == "EIFFEL":
-        year_pairs = ["2015-2016", "2015-2018", "2016-2018"]   # EIFFEL
-        
     parser = argparse.ArgumentParser(description="")
     parser.add_argument("--exp_yaml", type=str, default="arguments/exp_test.yaml", help="Path to experiment YAML file.")
     
     args = parser.parse_args()
     
     exp_name, dataset, subset, log_dir, dist_threshold = parse_yaml(args.exp_yaml)
+    
+    if dataset == "SESOKO":
+        year_pairs = ["2016-2017"]#, "2016-2018", "2017-2018"]   # SESOKO
+    elif dataset == "EIFFEL":
+        year_pairs = ["2016-2018", "2018-2020", "2016-2020"]   # EIFFEL
+        # year_pairs = ["2018-2020"]   # EIFFEL
     
     if "ours" in exp_name.lower():
         METHOD = "OURS"
@@ -115,9 +105,8 @@ if __name__ == "__main__":
         rgb_path1 = rgb_path0
         
         csv_files = [
-            Path(f"{EVAL_POINTS_DIR}/{dataset}/{subset}/evaluation_points_{year_pairs[0]}.csv"),
-            Path(f"{EVAL_POINTS_DIR}/{dataset}/{subset}/evaluation_points_{year_pairs[1]}.csv"),
-            Path(f"{EVAL_POINTS_DIR}/{dataset}/{subset}/evaluation_points_{year_pairs[2]}.csv"),
+            Path(f"{EVAL_POINTS_DIR}/{dataset}/{subset}/evaluation_points_{year_pair}.csv")
+            for year_pair in year_pairs
         ]
         
         for path in [model0, rgb_path0, *csv_files]:
@@ -131,14 +120,13 @@ if __name__ == "__main__":
         print(f"{yellow_text}MODEL:     {model0}{reset_text}")
         print(f"{yellow_text}RGB PATH:  {rgb_path0}{reset_text}")
         print(f"{yellow_text}CSV FILES: {csv_files}{reset_text}")
-        confirm = input(f"Please confirm that the above paths are correct (Y/n): ").strip().lower()
-        if confirm not in ["", "y"]:
-            print("Exiting. Please edit the paths in the script and re-run.")
-            exit(0)
+        # confirm = input(f"Please confirm that the above paths are correct (Y/n): ").strip().lower()
+        # if confirm not in ["", "y"]:
+        #     print("Exiting. Please edit the paths in the script and re-run.")
+        #     exit(0)
             
     if METHOD in ["BUFFER", "ICP"]:
         
-        # /media/beverley/beverley_t7/VSLAM-LAB-Evaluation/exp_sesoko_sskall_s05_icp/SESOKO/ssk18-s05/colmap_00000/0_transformed
         yellow_text = "\033[93m"
         reset_text = "\033[0m"
         print(f"{yellow_text}METHOD: {METHOD}, two models required.{reset_text}")
@@ -219,6 +207,8 @@ if __name__ == "__main__":
             sift_kpts = img0.xys 
             # print(sift_kpts)
             
+            uv_clicked_valid = []
+            uv_gt_valid = []
             uv_projected = []
             for click, groundtruth in zip(uv_clicked, uv_gt):
                 u_clicked, v_clicked = click
@@ -236,21 +226,45 @@ if __name__ == "__main__":
                     print(f"⚠️  Projection failed for point {pid} in image {img1_name}, skipping.")
                     continue
                 u_proj, v_proj = uv_proj
+                
+                # --- sanity check: does this 3D point have a track observation in img1? ---
+                obs = get_observation_in_image(pid, points3D0, img1)
+                if obs is not None:
+                    u_obs, v_obs = obs
+                    d_proj_obs = sqrt((u_proj - u_obs) ** 2 + (v_proj - v_obs) ** 2)
+                    print(f"    pid {pid}: observed in {img1_name} at ({u_obs:.1f}, {v_obs:.1f}), "
+                        f"projected at ({u_proj:.1f}, {v_proj:.1f}), Δ = {d_proj_obs:.2f} px")
+                else:
+                    print(f"    pid {pid}: NOT observed in {img1_name} (no cross-session track)")
 
                 # exclude out-of-bounds points (comment this out if you want to include them)
                 # if u_proj < 0 or u_proj >= w1 or v_proj < 0 or v_proj >= h1:
                 #     print(f"⚠️  Transformed point ({u_proj:.2f}, {v_proj:.2f}) is out of bounds for image size ({w1}, {h1}). Skipping.")
                 #     continue
                 
+                uv_clicked_valid.append(click)
+                uv_gt_valid.append(groundtruth)
                 uv_projected.append([u_proj, v_proj])
+                
                 reprojection_error = sqrt((u_proj - u_gt) ** 2 + (v_proj - v_gt) ** 2)
+                print(f"    Reprojection error for point {pid}: {reprojection_error:.2f} px")
+                
                 reprojection_errors.append(reprojection_error)
             
             # visualize results
             image0 = cv2.cvtColor(cv2.imread(str(path_0)), cv2.COLOR_BGR2RGB)
             image1 = cv2.cvtColor(cv2.imread(str(path_1)), cv2.COLOR_BGR2RGB)
 
-            fig, axs = plot_kpts_on_image_pair(image0, image1, uv_clicked, uv_gt, uv_projected)
+            colors = get_pair_colors(len(uv_clicked_valid))
+            
+            fig, axs = plot_kpts_on_image_pair(
+                image0,
+                image1,
+                np.asarray(uv_clicked_valid),
+                np.asarray(uv_gt_valid),
+                np.asarray(uv_projected),
+                colors=colors,
+            )
             fig.savefig(evaluation_dir / f"reprojection_{idx:03d}_{img0_name[:-4]}_to_{img1_name[:-4]}.png", bbox_inches="tight", dpi=300)
             # fig.savefig(evaluation_dir / f"reprojection_{idx:03d}_{img0_name[:-4]}_to_{img1_name[:-4]}.pdf", bbox_inches="tight", dpi=300)
             plt.close(fig)

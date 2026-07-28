@@ -22,7 +22,7 @@ sys.path.append(root)
 from baselines.VSLAM_LAB.path_constants import VSLAMLAB_BENCHMARK, VSLAMLAB_EVALUATION
 from baselines.VSLAM_LAB.Baselines.colmap.scripts.python.read_write_model import read_model
 from baselines.VSLAM_LAB.Baselines.LightGlue.lightglue import LightGlue, SuperPoint
-from utilities import parse_yaml, get_colmap_image_by_name, unrotate_kps_W, extract_keypoints, feature_matching, show_image_with_clickable_points, plot_kpts_on_image_pair
+from utilities import parse_yaml, get_colmap_image_by_name, unrotate_kps_W, extract_keypoints, feature_matching, show_image_with_clickable_points, plot_kpts_on_image_pair, get_pair_colors
 from constants import EVAL_POINTS_DIR
 
 BLUE = [106, 178, 212]
@@ -36,19 +36,20 @@ pink   = [c / 255.0 for c in PINK]
 grey   = [c / 255.0 for c in GREY]
 
 class PointEditor:
-    def __init__(self, ax, points, select_radius=12):
+    def __init__(self, ax, points, colors, select_radius=12):
+
         self.ax = ax
         self.points = points
+        self.colors = colors
         self.active_idx = None
         self.select_radius = select_radius
 
         self.scatter = ax.scatter(
-            points[:, 0],
-            points[:, 1],
-            c='green',
-            s=120,
-            marker='o',
-            edgecolors='white'
+            points[:,0],
+            points[:,1],
+            c=colors,
+            s=150,
+            edgecolors="white",
         )
 
         fig = ax.figure
@@ -86,7 +87,128 @@ class PointEditor:
         # reset
         self.active_idx = None
 
-def compute_fundamental_matrix(path_0, path_1):
+def epipolar_line_in_window(F, u0, v0, x_min, x_max, y_min, y_max):
+    """Epipolar line of (u0,v0) clipped to a viewing window. Returns two endpoints or None."""
+    line = cv2.computeCorrespondEpilines(
+        np.array([[[u0, v0]]], dtype=np.float32), 1, F)[0, 0]
+    a, b, c = line
+    pts = []
+    if abs(b) > 1e-9:  # y = -(a x + c)/b at window x-edges
+        for x in (x_min, x_max):
+            y = -(a * x + c) / b
+            if y_min <= y <= y_max:
+                pts.append((x, y))
+    if abs(a) > 1e-9:  # x = -(b y + c)/a at window y-edges
+        for y in (y_min, y_max):
+            x = -(b * y + c) / a
+            if x_min <= x <= x_max:
+                pts.append((x, y))
+    if len(pts) < 2:
+        return None
+    # take the two most distant intersection points (handles corner duplicates)
+    pts = np.array(pts)
+    d = np.linalg.norm(pts[:, None] - pts[None, :], axis=-1)
+    i, j = np.unravel_index(np.argmax(d), d.shape)
+    return pts[i], pts[j]
+
+
+class ZoomedPointRefiner:
+    """
+    Interactive refinement of one correspondence.
+    Left: zoomed image0 around the clicked point (reference).
+    Right: zoomed image1 around the H/F estimate, with epipolar line.
+      - left click: set corrected point
+      - scroll: zoom in/out (both panels)
+      - enter: accept current point
+      - escape: skip this point
+    """
+    def __init__(self, image0, image1, u0, v0, H, F, zoom=200):
+        self.u0, self.v0 = u0, v0
+        self.F = F
+        self.zoom = zoom
+        self.h1, self.w1 = image1.shape[:2]
+
+        # H estimate + F refinement as starting point
+        self.u_h, self.v_h = transfer_point_with_homography(H, u0, v0)
+        if F is not None:
+            self.u_gt, self.v_gt = transfer_H_refined_by_F(H, F, u0, v0)
+        else:
+            self.u_gt, self.v_gt = self.u_h, self.v_h
+        self.accepted = None
+
+        self.fig, self.axs = plt.subplots(1, 2, figsize=(16, 8))
+        self.axs[0].imshow(image0)
+        self.axs[1].imshow(image1)
+        self.axs[0].plot(u0, v0, 'o', ms=10, mfc='none', mec='green', mew=2)
+        self.axs[0].plot(u0, v0, '+', ms=14, color='green')
+        self.axs[0].set_title("image0 — clicked point")
+
+        # H estimate (cyan) and current/refined point (red)
+        self.axs[1].plot(self.u_h, self.v_h, 'x', ms=10, color='blue',
+                         label='H estimate')
+        (self.marker,) = self.axs[1].plot(self.u_gt, self.v_gt, 'o', ms=10,
+                                          mfc='none', mec='red', mew=2,
+                                          label='current')
+        (self.cross,) = self.axs[1].plot(self.u_gt, self.v_gt, '+', ms=14,
+                                         color='red')
+        self.epi_artist = None
+        self.axs[1].legend(loc='upper right')
+        self.axs[1].set_title("image1 — click to correct | scroll zoom | enter accept | esc skip")
+
+        self._set_views()
+        self._draw_epiline()
+
+        self.fig.canvas.mpl_connect('button_press_event', self.on_click)
+        self.fig.canvas.mpl_connect('scroll_event', self.on_scroll)
+        self.fig.canvas.mpl_connect('key_press_event', self.on_key)
+        plt.show()
+
+    def _set_views(self):
+        z = self.zoom
+        self.axs[0].set_xlim(self.u0 - z, self.u0 + z)
+        self.axs[0].set_ylim(self.v0 + z, self.v0 - z)   # inverted y for images
+        self.axs[1].set_xlim(self.u_gt - z, self.u_gt + z)
+        self.axs[1].set_ylim(self.v_gt + z, self.v_gt - z)
+
+    def _draw_epiline(self):
+        if self.F is None:
+            return
+        if self.epi_artist is not None:
+            self.epi_artist.remove()
+            self.epi_artist = None
+        x_min, x_max = sorted(self.axs[1].get_xlim())
+        y_min, y_max = sorted(self.axs[1].get_ylim())
+        seg = epipolar_line_in_window(self.F, self.u0, self.v0,
+                                      x_min, x_max, y_min, y_max)
+        if seg is not None:
+            (x1, y1), (x2, y2) = seg
+            (self.epi_artist,) = self.axs[1].plot(
+                [x1, x2], [y1, y2], '--', color=yellow, lw=1.5, alpha=0.8)
+        self.fig.canvas.draw_idle()
+
+    def on_click(self, event):
+        if event.inaxes != self.axs[1] or event.button != 1:
+            return
+        self.u_gt, self.v_gt = event.xdata, event.ydata
+        self.marker.set_data([self.u_gt], [self.v_gt])
+        self.cross.set_data([self.u_gt], [self.v_gt])
+        self.fig.canvas.draw_idle()
+
+    def on_scroll(self, event):
+        self.zoom *= 0.8 if event.button == 'up' else 1.25
+        self.zoom = float(np.clip(self.zoom, 30, max(self.h1, self.w1)))
+        self._set_views()
+        self._draw_epiline()
+
+    def on_key(self, event):
+        if event.key == 'enter':
+            self.accepted = (float(self.u_gt), float(self.v_gt))
+            plt.close(self.fig)
+        elif event.key == 'escape':
+            self.accepted = None
+            plt.close(self.fig)
+
+def compute_homography_and_fundamental_matrix(path_0, path_1):
     feats_dict0, feats_rot0, h0, w0 = extract_keypoints(path_0, features="superpoint")
     feats_dict1, feats_rot1, h1, w1 = extract_keypoints(path_1, features="superpoint")
     
@@ -108,27 +230,24 @@ def compute_fundamental_matrix(path_0, path_1):
     pts0 = pts0[matches_tensor[:,0]]
     pts1 = pts1[matches_tensor[:,1]]
 
-    F, inlier_mask = cv2.findFundamentalMat(pts0, pts1, cv2.FM_RANSAC, 5.0)
+    
+    H, _ = cv2.findHomography(pts0, pts1, cv2.RANSAC, 5.0)
+    F, _ = cv2.findFundamentalMat(pts0, pts1, cv2.FM_RANSAC, 5.0)
 
-    if F is None:
-        raise RuntimeError("cv2.findFundamentalMat failed; not enough good matches or points are degenerate.")
+    return H, F
 
-    return F, inlier_mask, pts0, pts1
-
-def transfer_point_with_fundamental(F, u_clicked, v_clicked, w1, h1):
-    pt0 = np.array([[[u_clicked, v_clicked]]], dtype=np.float32)
-    line = cv2.computeCorrespondEpilines(pt0, 1, F)[0, 0]
+def transfer_H_refined_by_F(H, F, u, v):
+    u_h, v_h = transfer_point_with_homography(H, u, v)
+    line = cv2.computeCorrespondEpilines(
+        np.array([[[u, v]]], dtype=np.float32), 1, F)[0, 0]
     a, b, c = line
+    t = (a * u_h + b * v_h + c) / (a * a + b * b)
+    return u_h - a * t, v_h - b * t
 
-    cx, cy = w1 / 2.0, h1 / 2.0
-    denom = a * a + b * b
-    if denom == 0:
-        return cx, cy
-
-    # Closest point on the epipolar line to the image center.
-    t = (a * cx + b * cy + c) / denom
-    u_gt = cx - a * t
-    v_gt = cy - b * t
+def transfer_point_with_homography(H, u_clicked, v_clicked):
+    pt0 = np.array([[[u_clicked, v_clicked]]], dtype=np.float32)
+    pt1 = cv2.perspectiveTransform(pt0, H)[0, 0]
+    u_gt, v_gt = pt1[0], pt1[1]
     return u_gt, v_gt
 
 def plot_warped_image(H, inliers, pts0, pts1, path_to_image0, path_to_image1, fig, ax, uv_projected=None, uv_groundtruth=None):
@@ -212,7 +331,7 @@ if __name__ == "__main__":
     rgb_path1 = rgb_path0
     
     ### IMPORTANT: change csv file name here to populate other years (2016-2017, 2018-2019, 2020-2021)
-    csv_file = Path(f"{EVAL_POINTS_DIR}/{dataset}/{subset}/evaluation_points_2015-2016.csv")
+    csv_file = Path(f"{EVAL_POINTS_DIR}/{dataset}/{subset}/evaluation_points_2016-2018.csv")
     
     yellow_text = "\033[93m"
     reset_text = "\033[0m"
@@ -241,65 +360,95 @@ if __name__ == "__main__":
         if is_populated(row.get("uv_clicked")):
             print(f"[SKIP] Row {idx} already populated.")
             continue
-        img0_name = row['img0']
-        img1_name = row['img1']
         
-        path_0 = Path(rgb_path0 / img0_name)
-        path_1 = Path(rgb_path1 / img1_name)
+        try: 
+            img0_name = row['img0']
+            img1_name = row['img1']
+            
+            path_0 = Path(rgb_path0 / img0_name)
+            path_1 = Path(rgb_path1 / img1_name)
 
-        img0 = get_colmap_image_by_name(images0, img0_name)
-        img1 = get_colmap_image_by_name(images1, img1_name)
-        camera1 = cameras1[img1.camera_id]
-        h1, w1 = camera1.height, camera1.width
-    
-        F, inlier_mask, pts0_H, pts1_H = compute_fundamental_matrix(path_0, path_1)
-        
-        # show images to help with kpt selection
-        image0 = cv2.cvtColor(cv2.imread(str(path_0)), cv2.COLOR_BGR2RGB)
-        image1 = cv2.cvtColor(cv2.imread(str(path_1)), cv2.COLOR_BGR2RGB)
-        plot_kpts_on_image_pair(image0, image1, None, None, None)
-
-        # get keypoints from the first image andlookup its corresponding 3D point
-        results = show_image_with_clickable_points(path_0, img0)
-        
-        uv_clicked = []
-        uv_groundtruth = []
-        for result in results:
-            u_clicked, v_clicked, pid = result['u'], result['v'], result['pid']
-            if pid == -1:
-                print(f"⚠️  No 3D point found for clicked point ({u_clicked:.2f}, {v_clicked:.2f}). Skipping.")
+            img0 = get_colmap_image_by_name(images0, img0_name)
+            img1 = get_colmap_image_by_name(images1, img1_name)
+            
+            if img0 is None:
+                print(f"[ERROR] Could not find '{img0_name}' in COLMAP model. Skipping.")
                 continue
 
-            # transform clicked point using the fundamental matrix (epipolar transfer)
-            u_gt, v_gt = transfer_point_with_fundamental(F, u_clicked, v_clicked, w1, h1)
-            
-            # ignore points that transform out of image bounds because we cannot correct them
-            if u_gt < 0 or u_gt >= w1 or v_gt < 0 or v_gt >= h1:
-                print(f"⚠️  Transformed point ({u_gt:.2f}, {v_gt:.2f}) is out of bounds for image size ({w1}, {h1}). Skipping.")
+            if img1 is None:
+                print(f"[ERROR] Could not find '{img1_name}' in COLMAP model. Skipping.")
                 continue
-            
-            uv_clicked.append([u_clicked, v_clicked])
-            uv_groundtruth.append([float(u_gt), float(v_gt)])
 
-        if not uv_clicked:
-            print(f"[SKIP] No valid points clicked for row {idx}. Continuing.")
+            camera1 = cameras1[img1.camera_id]
+            h1, w1 = camera1.height, camera1.width
+        
+            H, F = compute_homography_and_fundamental_matrix(path_0, path_1)
+            
+            # show images to help with kpt selection
+            image0 = cv2.cvtColor(cv2.imread(str(path_0)), cv2.COLOR_BGR2RGB)
+            image1 = cv2.cvtColor(cv2.imread(str(path_1)), cv2.COLOR_BGR2RGB)
+            plot_kpts_on_image_pair(image0, image1, None, None, None)
+
+            # get keypoints from the first image andlookup its corresponding 3D point
+            results = show_image_with_clickable_points(path_0, img0)
+            
+            uv_clicked = []
+            uv_groundtruth = []
+            for result in results:
+                u_clicked, v_clicked, pid = result['u'], result['v'], result['pid']
+                if pid == -1:
+                    print(f"⚠️  No 3D point found for clicked point ({u_clicked:.2f}, {v_clicked:.2f}). Skipping.")
+                    continue
+                
+                refiner = ZoomedPointRefiner(image0, image1, u_clicked, v_clicked, H, F, zoom=200)
+                if refiner.accepted is None:
+                    print("⚠️  Point skipped by user.")
+                    continue
+                u_gt, v_gt = refiner.accepted
+
+                if not (0 <= u_gt < w1 and 0 <= v_gt < h1):
+                    print(f"⚠️  Corrected point out of bounds. Skipping.")
+                    continue
+                
+                uv_clicked.append([u_clicked, v_clicked])
+                uv_groundtruth.append([float(u_gt), float(v_gt)])
+
+            if not uv_clicked:
+                print(f"[SKIP] No valid points clicked for row {idx}. Continuing.")
+                continue
+
+            # fig, axs = plot_warped_image(H, inlier_mask, pts0_H, pts1_H, str(path_0), str(path_1), fig=None, ax=plt.gca(), uv_projected=None, uv_groundtruth=np.array(uv_groundtruth))
+        
+            uv_gt_np = np.array(uv_groundtruth, dtype=np.float32)
+        
+            # manually correct groundtruth
+            colors = get_pair_colors(len(uv_clicked))
+
+            _, axs = plot_kpts_on_image_pair(
+                image0,
+                image1,
+                uv_clicked,
+                None,
+                None
+            )
+            editor = PointEditor(axs[1], uv_gt_np, colors)
+            
+            plt.show()
+        
+            uv_groundtruth = uv_gt_np.tolist()
+            
+            df.loc[idx, "uv_clicked"] = json.dumps(uv_clicked)
+            df.loc[idx, "uv_groundtruth"] = json.dumps(uv_groundtruth)
+            
+            print(f"[✅] Updated row {idx}: {img0_name} -> {img1_name}")
+            df.to_csv(csv_file, index=False)
+            print(f"[💾] Saved progress to {csv_file}")
+        
+        except Exception as e:
+            print(f"Failed on row {idx}: {e}")
+            df.to_csv(csv_file, index=False)
+            print(f"[💾] Saved progress to {csv_file}")
             continue
-
-        # fig, axs = plot_warped_image(H, inlier_mask, pts0_H, pts1_H, str(path_0), str(path_1), fig=None, ax=plt.gca(), uv_projected=None, uv_groundtruth=np.array(uv_groundtruth))
-    
-        uv_gt_np = np.array(uv_groundtruth, dtype=np.float32)
-    
-        # manually correct groundtruth
-        _, axs = plot_kpts_on_image_pair(image0, image1, uv_clicked, None, None)
-        editor = PointEditor(axs[1], uv_gt_np)
-        plt.show()
-    
-        uv_groundtruth = uv_gt_np.tolist()
         
-        df.loc[idx, "uv_clicked"] = json.dumps(uv_clicked)
-        df.loc[idx, "uv_groundtruth"] = json.dumps(uv_groundtruth)
-        
-        print(f"[✅] Updated row {idx}: {img0_name} -> {img1_name}")
-    
     df.to_csv(csv_file, index=False)
     print(f"\n[💾] Updated CSV saved: {csv_file}")

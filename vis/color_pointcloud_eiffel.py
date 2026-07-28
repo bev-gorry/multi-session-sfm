@@ -46,9 +46,6 @@ if __name__ == "__main__":
     
     alpha_tint = 0.4
     
-    # subsets = ["s01", "s02", "s03", "s04"]
-    # for subset in subsets:
-        
     model_path = Path(f'{VSLAMLAB_EVALUATION}/{exp_name}/{dataset}/{subset}/colmap_00000/0')
     rgb_path = Path(f'{VSLAMLAB_BENCHMARK}/{dataset}/{subset}/rgb_0')
     
@@ -57,13 +54,13 @@ if __name__ == "__main__":
     
     cameras, images, points3D = read_model(model_path, ext='.bin')
     
-    numpoints_eff15 = 0
     numpoints_eff16 = 0
     numpoints_eff18 = 0
-    numpoints_eff15_eff16 = 0
+    numpoints_eff20 = 0
     numpoints_eff16_eff18 = 0
-    numpoints_eff15_eff18 = 0
-    numpoints_eff15_eff16_eff18 = 0
+    numpoints_eff18_eff20 = 0
+    numpoints_eff16_eff20 = 0
+    numpoints_eff16_eff18_eff20 = 0
     for pid, point in tqdm(points3D.items(), desc="Coloring point cloud by sequence"):
         
         # if pid > 100:
@@ -84,34 +81,34 @@ if __name__ == "__main__":
                 
                 sequences_that_see_this_point.add(sequence_name)
                 
-        if "eff18" in sequences_that_see_this_point and "eff16" in sequences_that_see_this_point and "eff15" in sequences_that_see_this_point:
+        if "eff20" in sequences_that_see_this_point and "eff18" in sequences_that_see_this_point and "eff16" in sequences_that_see_this_point:
             # point.rgb[:] = np.array(GREY, dtype=np.uint8)
             point.rgb[:] = tint_rgb(orig_rgb, GREY, alpha=alpha_tint)
-            numpoints_eff15_eff16_eff18 += 1
-        if "eff15" in sequences_that_see_this_point and "eff16" in sequences_that_see_this_point and "eff18" not in sequences_that_see_this_point:
-            # point.rgb[:] = np.array(GREY, dtype=np.uint8)
-            point.rgb[:] = tint_rgb(orig_rgb, GREY, alpha=alpha_tint)
-            numpoints_eff15_eff16 += 1
-        if "eff16" in sequences_that_see_this_point and "eff18" in sequences_that_see_this_point and "eff15" not in sequences_that_see_this_point:
+            numpoints_eff16_eff18_eff20 += 1
+        if "eff16" in sequences_that_see_this_point and "eff18" in sequences_that_see_this_point and "eff20" not in sequences_that_see_this_point:
             # point.rgb[:] = np.array(GREY, dtype=np.uint8)
             point.rgb[:] = tint_rgb(orig_rgb, GREY, alpha=alpha_tint)
             numpoints_eff16_eff18 += 1
-        if "eff15" in sequences_that_see_this_point and "eff18" in sequences_that_see_this_point and "eff16" not in sequences_that_see_this_point:
+        if "eff18" in sequences_that_see_this_point and "eff20" in sequences_that_see_this_point and "eff16" not in sequences_that_see_this_point:
             # point.rgb[:] = np.array(GREY, dtype=np.uint8)
             point.rgb[:] = tint_rgb(orig_rgb, GREY, alpha=alpha_tint)
-            numpoints_eff15_eff18 += 1
-        if "eff15" in sequences_that_see_this_point and "eff16" not in sequences_that_see_this_point and "eff18" not in sequences_that_see_this_point:
+            numpoints_eff18_eff20 += 1
+        if "eff16" in sequences_that_see_this_point and "eff20" in sequences_that_see_this_point and "eff18" not in sequences_that_see_this_point:
+            # point.rgb[:] = np.array(GREY, dtype=np.uint8)
+            point.rgb[:] = tint_rgb(orig_rgb, GREY, alpha=alpha_tint)
+            numpoints_eff16_eff20 += 1
+        if "eff16" in sequences_that_see_this_point and "eff18" not in sequences_that_see_this_point and "eff20" not in sequences_that_see_this_point:
             # point.rgb[:] = np.array(BLUE, dtype=np.uint8)    # seen in 2016
             point.rgb[:] = tint_rgb(orig_rgb, BLUE, alpha=alpha_tint)
-            numpoints_eff15 += 1
-        if "eff16" in sequences_that_see_this_point and "eff15" not in sequences_that_see_this_point and "eff18" not in sequences_that_see_this_point:
+            numpoints_eff16 += 1
+        if "eff18" in sequences_that_see_this_point and "eff16" not in sequences_that_see_this_point and "eff20" not in sequences_that_see_this_point:
             # point.rgb[:] = np.array(YELLOW, dtype=np.uint8)  # seen in 2017
             point.rgb[:] = tint_rgb(orig_rgb, YELLOW, alpha=alpha_tint)
-            numpoints_eff16 += 1
-        if "eff18" in sequences_that_see_this_point and "eff15" not in sequences_that_see_this_point and "eff16" not in sequences_that_see_this_point:
+            numpoints_eff18 += 1
+        if "eff20" in sequences_that_see_this_point and "eff16" not in sequences_that_see_this_point and "eff18" not in sequences_that_see_this_point:
             # point.rgb[:] = np.array(PINK, dtype=np.uint8)   # seen in 2018
             point.rgb[:] = tint_rgb(orig_rgb, PINK, alpha=alpha_tint)
-            numpoints_eff18 += 1
+            numpoints_eff20 += 1
 
 
     model_root = Path(model_path).parent

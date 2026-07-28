@@ -45,10 +45,7 @@ if __name__ == "__main__":
     exp_name, dataset, subset, log_dir, dist_threshold = parse_yaml(args.exp_yaml)
     
     alpha_tint = 0.4
-    
-    # subsets = ["s01", "s02", "s03", "s04"]
-    # for subset in subsets:
-        
+
     model_path = Path(f'{VSLAMLAB_EVALUATION}/{exp_name}/{dataset}/{subset}/colmap_00000/0')
     rgb_path = Path(f'{VSLAMLAB_BENCHMARK}/{dataset}/{subset}/rgb_0')
     
@@ -112,7 +109,6 @@ if __name__ == "__main__":
             # point.rgb[:] = np.array(PINK, dtype=np.uint8)   # seen in 2018
             point.rgb[:] = tint_rgb(orig_rgb, PINK, alpha=alpha_tint)
             numpoints_ssk18 += 1
-
 
     model_root = Path(model_path).parent
     colored_output_path = model_root / "0_colored"

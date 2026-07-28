@@ -169,6 +169,20 @@ def _point_identity_components(point_ids: np.ndarray | list[int]) -> tuple[np.nd
     return class_ids, keypoint_ids
 
 
+def _point_is_inlier(
+    point,
+    max_reprojection_error: float | None,
+    min_track_length: int,
+) -> bool:
+    if not np.isfinite(point.xyz).all():
+        return False
+    if max_reprojection_error is not None and float(point.error) > max_reprojection_error:
+        return False
+    if min_track_length > 0 and len(point.image_ids) < min_track_length:
+        return False
+    return True
+
+
 def _image_lookup(rgb_df: pd.DataFrame) -> dict[str, pd.Series]:
     lookup = {}
     for _, row in rgb_df.iterrows():
@@ -374,6 +388,8 @@ def _build_session_point_clouds(
     sequences: list[str],
     alpha_tint: float,
     track_summary_limit: int,
+    max_reprojection_error: float | None,
+    min_track_length: int,
 ) -> dict[str, SessionPointCloud]:
     session_color = _session_color_map(sequences)
     clouds = {}
@@ -386,6 +402,8 @@ def _build_session_point_clouds(
         track_summaries = []
 
         for point_id, point in points3d.items():
+            if not _point_is_inlier(point, max_reprojection_error, min_track_length):
+                continue
             observed_sequences = point_sequences.get(int(point_id), set())
             if sequence_name not in observed_sequences:
                 continue
@@ -1851,6 +1869,7 @@ def _send_blueprint(
             origin="world",
             name="3D reconstruction",
             line_grid=False,
+            background=[255, 255, 255],
         ),
         rrb.Vertical(
             *right_views,
@@ -1928,6 +1947,24 @@ def _parse_args():
     parser.add_argument("--point-radius", type=float, default=0.015)
     parser.add_argument("--reprojected-point-radius", type=float, default=2.0)
     parser.add_argument("--alpha-tint", type=float, default=0.4)
+    parser.add_argument(
+        "--point-max-reprojection-error",
+        type=float,
+        default=8.0,
+        help=(
+            "Hide COLMAP points with reprojection error above this threshold in the 3D view. "
+            "Use a negative value to disable the filter."
+        ),
+    )
+    parser.add_argument(
+        "--point-min-track-length",
+        type=int,
+        default=3,
+        help=(
+            "Hide COLMAP points observed in fewer than this many images in the 3D view. "
+            "Use 0 to disable the filter."
+        ),
+    )
     parser.add_argument("--strict-images", action="store_true")
     parser.add_argument(
         "--no-reprojected-points",
@@ -2132,6 +2169,11 @@ def main():
         None if args.max_splats_per_session < 0 else args.max_splats_per_session
     )
     splat_max_radius = None if args.splat_max_radius < 0 else args.splat_max_radius
+    max_point_reprojection_error = (
+        None
+        if args.point_max_reprojection_error < 0
+        else args.point_max_reprojection_error
+    )
 
     cameras, images, points3d = read_model(str(model_path), ext="")
     rgb_lookup = _image_lookup(rgb_df)
@@ -2191,6 +2233,8 @@ def main():
             sequences,
             alpha_tint=args.alpha_tint,
             track_summary_limit=args.point_metadata_observation_limit,
+            max_reprojection_error=max_point_reprojection_error,
+            min_track_length=args.point_min_track_length,
         )
 
     if args.inspect_image is not None and args.inspect_pixel is not None:
