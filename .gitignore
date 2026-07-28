@@ -36,3 +36,5 @@ ENV/
 # project outputs
 outputs/
 baselines/
+reprojection/
+arguments/
