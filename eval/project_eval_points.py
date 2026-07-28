@@ -23,7 +23,7 @@ sys.path.append(root)
 
 from baselines.VSLAM_LAB.path_constants import VSLAMLAB_BENCHMARK, VSLAMLAB_EVALUATION
 from baselines.VSLAM_LAB.Baselines.colmap.scripts.python.read_write_model import read_model
-from utilities import parse_yaml, get_colmap_image_by_name, project_colmap_point, plot_kpts_on_image_pair, plot_rpe_hist, get_pair_colors
+from utilities import parse_yaml, get_colmap_image_by_name, project_colmap_point, plot_kpts_on_image_pair, plot_rpe_hist, get_pair_colors, get_observation_in_image
 from constants import plotting_parameters, EVAL_POINTS_DIR
 
 plt.rcParams.update({
@@ -80,8 +80,8 @@ if __name__ == "__main__":
     if dataset == "SESOKO":
         year_pairs = ["2016-2017"]#, "2016-2018", "2017-2018"]   # SESOKO
     elif dataset == "EIFFEL":
-        # year_pairs = ["2016-2018", "2018-2020", "2016-2020"]   # EIFFEL
-        year_pairs = ["2018-2020"]   # EIFFEL
+        year_pairs = ["2016-2018", "2018-2020", "2016-2020"]   # EIFFEL
+        # year_pairs = ["2018-2020"]   # EIFFEL
     
     if "ours" in exp_name.lower():
         METHOD = "OURS"
@@ -120,14 +120,13 @@ if __name__ == "__main__":
         print(f"{yellow_text}MODEL:     {model0}{reset_text}")
         print(f"{yellow_text}RGB PATH:  {rgb_path0}{reset_text}")
         print(f"{yellow_text}CSV FILES: {csv_files}{reset_text}")
-        confirm = input(f"Please confirm that the above paths are correct (Y/n): ").strip().lower()
-        if confirm not in ["", "y"]:
-            print("Exiting. Please edit the paths in the script and re-run.")
-            exit(0)
+        # confirm = input(f"Please confirm that the above paths are correct (Y/n): ").strip().lower()
+        # if confirm not in ["", "y"]:
+        #     print("Exiting. Please edit the paths in the script and re-run.")
+        #     exit(0)
             
     if METHOD in ["BUFFER", "ICP"]:
         
-        # /media/beverley/beverley_t7/VSLAM-LAB-Evaluation/exp_sesoko_sskall_s05_icp/SESOKO/ssk18-s05/colmap_00000/0_transformed
         yellow_text = "\033[93m"
         reset_text = "\033[0m"
         print(f"{yellow_text}METHOD: {METHOD}, two models required.{reset_text}")
@@ -211,7 +210,6 @@ if __name__ == "__main__":
             uv_clicked_valid = []
             uv_gt_valid = []
             uv_projected = []
-            uv_backproject = []
             for click, groundtruth in zip(uv_clicked, uv_gt):
                 u_clicked, v_clicked = click
                 u_gt, v_gt = groundtruth
@@ -228,21 +226,29 @@ if __name__ == "__main__":
                     print(f"⚠️  Projection failed for point {pid} in image {img1_name}, skipping.")
                     continue
                 u_proj, v_proj = uv_proj
+                
+                # --- sanity check: does this 3D point have a track observation in img1? ---
+                obs = get_observation_in_image(pid, points3D0, img1)
+                if obs is not None:
+                    u_obs, v_obs = obs
+                    d_proj_obs = sqrt((u_proj - u_obs) ** 2 + (v_proj - v_obs) ** 2)
+                    print(f"    pid {pid}: observed in {img1_name} at ({u_obs:.1f}, {v_obs:.1f}), "
+                        f"projected at ({u_proj:.1f}, {v_proj:.1f}), Δ = {d_proj_obs:.2f} px")
+                else:
+                    print(f"    pid {pid}: NOT observed in {img1_name} (no cross-session track)")
 
                 # exclude out-of-bounds points (comment this out if you want to include them)
                 # if u_proj < 0 or u_proj >= w1 or v_proj < 0 or v_proj >= h1:
                 #     print(f"⚠️  Transformed point ({u_proj:.2f}, {v_proj:.2f}) is out of bounds for image size ({w1}, {h1}). Skipping.")
                 #     continue
                 
-                uv_backproj = project_colmap_point(xyz, img0, cameras0[img0.camera_id])
-                u_back, v_back = uv_backproj
-                uv_backproject.append([u_back, v_back])
-                
                 uv_clicked_valid.append(click)
                 uv_gt_valid.append(groundtruth)
                 uv_projected.append([u_proj, v_proj])
                 
                 reprojection_error = sqrt((u_proj - u_gt) ** 2 + (v_proj - v_gt) ** 2)
+                print(f"    Reprojection error for point {pid}: {reprojection_error:.2f} px")
+                
                 reprojection_errors.append(reprojection_error)
             
             # visualize results
@@ -257,7 +263,6 @@ if __name__ == "__main__":
                 np.asarray(uv_clicked_valid),
                 np.asarray(uv_gt_valid),
                 np.asarray(uv_projected),
-                np.asarray(uv_backproject),
                 colors=colors,
             )
             fig.savefig(evaluation_dir / f"reprojection_{idx:03d}_{img0_name[:-4]}_to_{img1_name[:-4]}.png", bbox_inches="tight", dpi=300)
