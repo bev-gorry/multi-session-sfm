@@ -1,5 +1,0 @@
-exp_eff_full_ours:
-  Config: config_eff_full_ours.yaml
-  NumRuns: 1
-  Parameters: {matcher_type: custom, verbose: 0, step_size: 2}
-  Module: glomap
