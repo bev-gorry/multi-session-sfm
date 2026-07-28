@@ -18,7 +18,7 @@ EIFFEL_SEQUENCES = {
     "eff16": "https://www.seanoe.org/data/00810/92226/data/98289.zip",
     "eff18": "https://www.seanoe.org/data/00810/92226/data/98314.zip",
     "eff20": "https://www.seanoe.org/data/00810/92226/data/98356.zip",
-    # "global": "https://www.seanoe.org/data/00810/92226/data/98357.zip",
+    "global": "https://www.seanoe.org/data/00810/92226/data/98357.zip",
 }
 
 R = 6378137.0  # WGS84
@@ -235,6 +235,15 @@ def process_sequence(seq_path: Path, ref_nav):
 
 def main():
     dataset_root = Path("/media/beverley/beverley_t7/SANGOHENKA-BENCHMARK/EIFFEL_ZIP")
+    
+    yellow_text = "\033[93m"
+    reset_text = "\033[0m"
+    print(f"{yellow_text}DATASET ROOT PATH: {dataset_root}{reset_text}")
+    confirm = input(f"Please confirm that the above hard-coded path is correct (Y/n): ").strip().lower()
+    if confirm not in ["", "y"]:
+        print("Exiting. Please edit the paths in the script and re-run.")
+        exit(0)
+    
     dataset_root.mkdir(parents=True, exist_ok=True)
 
     # download + extract
