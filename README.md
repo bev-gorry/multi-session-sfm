@@ -1,7 +1,6 @@
 <p align="center">
 
   <h1 align="center"> Long-Term Multi-Session 3D Reconstruction Under Substantial Appearance Change </h1>
-  <!-- <h3 align="center">Long-Term Multi-Session 3D Reconstruction Under Substantial Appearance Change</h3>  -->
   <p align="center">
     <a href="https://github.com/bev-gorry"><strong>Beverley Gorry</strong></a>
     ·
@@ -52,32 +51,17 @@ git submodule update --init --recursive
 pixi run -e lightglue install
 ```
 
-<!-- Optionally, clone colmap and glomap (VSLAM-LAB will do this automatically).
-```bash
-pixi run -e colmap git-clone
-pixi run -e glomap git-clone
-``` -->
-
 NOTE: Please update the following variables in _VSLAM_LAB/path_constants.py_
 
 ```
 HUGGINGFACE_TOKEN
 ```
 
-<!-- Clone and setup LightGlue:
-
-```bash
-pixi run git-clone-lightglue
-pixi run install-lightglue
-``` -->
-
-<!-- NTS: Somewhere here I will also need to install colmap and glomap and make the VPR changes which are not on huggingface. -->
-
 ## IMPORTANT: Experiment Setup
 Ensure that the necessary datasets and sequences are downloaded in VSLAM-LAB format **before** computing the distance matrix.
 ```bash
 cd baselines/VSLAM_LAB
-pixi run get-experiment-resources ../../arguments/exp_test_vslamlab.yaml
+pixi run get-experiment-resources ../../arguments/exp_test_ours_vslamlab.yaml
 cd ../..
 ```
 
@@ -86,28 +70,22 @@ cd ../..
 Compute a distance matrix **D.npy** from a combined 'all' subset. List the VPR method and argument yaml file in succession.
 
 ```bash
-pixi run -e vprlab vpr-lab megaloc ../../arguments/exp_test.yaml
+pixi run -e vprlab vpr-lab megaloc ../../arguments/exp_test_ours.yaml
 ```
 
 Clean the distance matrix by setting diagonal values and same-sequence values to inf. Then apply the distance threshold which must be specified in your experiment yaml file.
 
 ```bash
-pixi run -e lightglue python scripts/clean_distance_matrix.py --exp_yaml=arguments/exp_test.yaml
-pixi run -e lightglue python scripts/apply_distance_threshold.py --exp_yaml=arguments/exp_test.yaml
+pixi run -e lightglue python scripts/clean_distance_matrix.py --exp_yaml=arguments/exp_test_ours.yaml
+pixi run -e lightglue python scripts/apply_distance_threshold.py --exp_yaml=arguments/exp_test_ours.yaml
 ```
-
-<!-- WIP: This may change to include the threshold as a command rather than specifying it in the experiment yaml. We may also standardize the output: **D_brinary_0.6.npy** -> **D_binary.npy**.
-
-```bash
-pixi run python scripts/apply_distance_threshold.py --threshold=0.6
-``` -->
 
 ## VSLAM-LAB
 
 Create an experiment yaml file (specific to your VSLAM-Lab exp) and ensure that it points to the correct config file in VSLAM-Lab. Ensure that these variables in _VSLAM_LAB/path_constants.py_ are correct according to your own benchmark containing the distance matrix: VSLAMLAB_BENCHMARK, VSLAMLAB_EVALUATION. Run VSLAM-Lab:
 
 ```bash
-pixi run -e vslamlab vslamlab ../../arguments/exp_test_vslamlab.yaml --overwrite
+pixi run -e vslamlab vslamlab ../../arguments/exp_test_ours_vslamlab.yaml --overwrite
 ```
 
 ## Nerfstudio Training
@@ -118,7 +96,7 @@ Nerfstudio is included as a git submodule at `baselines/nerfstudio`, using Tobia
 pixi run train-splatfacto
 ```
 
-By default this resolves `arguments/exp_test.yaml` to the benchmark image directory from `log_dir`, the VSLAM-LAB COLMAP model at `baselines/VSLAM-LAB-Evaluation/<exp_name>/<dataset>/<subset>/colmap_00000/0`, and runs Nerfstudio's COLMAP dataparser:
+By default this resolves `arguments/exp_test_ours.yaml` to the benchmark image directory from `log_dir`, the VSLAM-LAB COLMAP model at `baselines/VSLAM-LAB-Evaluation/<exp_name>/<dataset>/<subset>/colmap_00000/0`, and runs Nerfstudio's COLMAP dataparser:
 
 ```bash
 ns-train splatfacto --vis viewer colmap --data <benchmark-subset> --images-path rgb_0 --colmap-path <resolved-colmap-model>
@@ -134,7 +112,7 @@ pixi run train-splatfacto "--data=/path/to/monkey_output --images-path=images --
 Color each point in a pointcloud according to the year in which it is observed. This changes depending on the dataset.
 
 ```bash
-pixi run -e lightglue python vis/color_pointcloud_sesoko.py --exp_yaml=arguments/exp_test.yaml
+pixi run -e lightglue python vis/color_pointcloud_sesoko.py --exp_yaml=arguments/exp_test_ours.yaml
 ```
 
 ## Rerun Visualization
@@ -143,7 +121,7 @@ View the joint COLMAP reconstruction in [Rerun](https://rerun.io/), grouped by s
 Generate one COLMAP-initialized Gaussian Splat PLY per session:
 
 ```bash
-pixi run -e lightglue export-session-splats "--exp_yaml=arguments/exp_test.yaml"
+pixi run -e lightglue export-session-splats "--exp_yaml=arguments/exp_test_ours.yaml"
 ```
 
 The exporter writes splats to `outputs/gaussian_splats/<exp_name>/<dataset>/<subset>/`. The lightweight viewer opens with an explicit Rerun layout:
@@ -160,13 +138,13 @@ The exporter writes splats to `outputs/gaussian_splats/<exp_name>/<dataset>/<sub
 Run the default lightweight viewer:
 
 ```bash
-pixi run -e rerun-viewer rerun-viewer "--exp_yaml=arguments/exp_test.yaml"
+pixi run -e rerun-viewer rerun-viewer "--exp_yaml=arguments/exp_test_ours.yaml"
 ```
 
 By default this logs 25 sorted images per session, cross-session reprojection overlays for those images, all session point clouds, and no full point-track documents or splats. To log every image:
 
 ```bash
-pixi run -e rerun-viewer rerun-viewer "--exp_yaml=arguments/exp_test.yaml --all-images"
+pixi run -e rerun-viewer rerun-viewer "--exp_yaml=arguments/exp_test_ours.yaml --all-images"
 ```
 
 For the included Sesoko example, `--all-images` logs the complete three-session sequence (`ssk16`, `ssk17`, and `ssk18`: 740 images total). Use `--sessions` only when you intentionally want a subset.
@@ -174,7 +152,7 @@ For the included Sesoko example, `--all-images` logs the complete three-session 
 To include Gaussian splat centers as toggleable point-style Rerun geometry:
 
 ```bash
-pixi run -e rerun-viewer rerun-viewer "--exp_yaml=arguments/exp_test.yaml --show-splats"
+pixi run -e rerun-viewer rerun-viewer "--exp_yaml=arguments/exp_test_ours.yaml --show-splats"
 ```
 
 Splats are logged under `world/gaussian_splats/<session>`. They are decoded from the PLY centers and displayed as a radius/opacity point proxy. Rerun 0.33 does not expose a native anisotropic Gaussian-splat rasterizer, so this is useful for aligned 3D inspection but is still not a continuous 3DGS render. If they are hidden by the COLMAP points, temporarily disable `world/sessions/*/points3D`, increase their apparent footprint with `--splat-radius-scale`, `--splat-min-radius`, or `--splat-opacity-scale`, or remove the default cap with `--max-splats-per-session=-1`.
@@ -182,7 +160,7 @@ Splats are logged under `world/gaussian_splats/<session>`. They are decoded from
 To make every logged camera frustum open to its image and participate in COLMAP point/image correspondence picking:
 
 ```bash
-pixi run -e rerun-viewer rerun-viewer "--exp_yaml=arguments/exp_test.yaml --all-images --log-camera-images"
+pixi run -e rerun-viewer rerun-viewer "--exp_yaml=arguments/exp_test_ours.yaml --all-images --log-camera-images"
 ```
 
 This logs the complete Sesoko sequence images under `world/sessions/<session>/cameras/<image>/image`. It is heavier than the default timeline view, but it is the mode to use when you want the whole three-session sequence available from frustums.
@@ -192,13 +170,13 @@ The static frustum images contain the COLMAP observations by default. To also pu
 To draw current-frame camera-to-point rays:
 
 ```bash
-pixi run -e rerun-viewer rerun-viewer "--exp_yaml=arguments/exp_test.yaml --show-rays --max-rays-per-session=50"
+pixi run -e rerun-viewer rerun-viewer "--exp_yaml=arguments/exp_test_ours.yaml --show-rays --max-rays-per-session=50"
 ```
 
 To show cross-session support images for the active image, ranked by shared COLMAP point tracks:
 
 ```bash
-pixi run -e rerun-viewer rerun-viewer "--exp_yaml=arguments/exp_test.yaml --support-images-per-session=1"
+pixi run -e rerun-viewer rerun-viewer "--exp_yaml=arguments/exp_test_ours.yaml --support-images-per-session=1"
 ```
 
 The support image row logs each support camera/image under `world/support_images/<session>/slot_<n>/image` with the same `POINT3D_ID` correspondence fields as the 3D point cloud and current image overlays. Hovering/selecting a point can then link across the current image and visible support images from other sessions. Add `--support-include-active-session` if you also want same-session support images.
@@ -208,7 +186,7 @@ Rerun's automatic hover correspondence only works across entities that are alrea
 For the most reliable point-to-images workflow, select a pixel/reprojection, read its `point_id` from the selection panel, then rerun the viewer in inspected-point mode:
 
 ```bash
-pixi run -e rerun-viewer rerun-viewer "--exp_yaml=arguments/exp_test.yaml --inspect-point-id=1146"
+pixi run -e rerun-viewer rerun-viewer "--exp_yaml=arguments/exp_test_ours.yaml --inspect-point-id=1146"
 ```
 
 This logs `world/inspected_points/pid_<POINT3D_ID>` with a highlighted 3D point, persistent camera-to-point rays, and every COLMAP observation image for that point across all sessions in the precomputed model. Use `--max-inspect-observations-per-point` to cap very long tracks, and `--inspect-point-image-views` to control how many observation images are placed directly in the blueprint.
@@ -218,13 +196,13 @@ Point-ID inspection is focused and lightweight by default: it does not load the 
 If only the corresponding filenames are needed, print them without opening Rerun:
 
 ```bash
-pixi run -e rerun-viewer rerun-viewer "--exp_yaml=arguments/exp_test.yaml --inspect-point-id=1146 --inspect-lookup-only"
+pixi run -e rerun-viewer rerun-viewer "--exp_yaml=arguments/exp_test_ours.yaml --inspect-point-id=1146 --inspect-lookup-only"
 ```
 
 If extracting the `point_id` from Rerun is awkward, look it up directly from an image and clicked pixel:
 
 ```bash
-pixi run -e rerun-viewer rerun-viewer "--exp_yaml=arguments/exp_test.yaml --inspect-image=8315199.jpg --inspect-pixel 137.3 485.8 --inspect-source-session=ssk17"
+pixi run -e rerun-viewer rerun-viewer "--exp_yaml=arguments/exp_test_ours.yaml --inspect-image=8315199.jpg --inspect-pixel 137.3 485.8 --inspect-source-session=ssk17"
 ```
 
 The command finds the nearest reprojected point from `ssk17`, prints its `point_id` and every COLMAP observation image/pixel across all sessions, then automatically opens the inspected-point views and rays. Omit `--inspect-source-session` to compare the nearest observed/reprojected candidate from every session. The default lookup tolerance is 15 pixels; adjust it with `--inspect-pixel-max-distance`.
@@ -232,30 +210,30 @@ The command finds the nearest reprojected point from `ssk17`, prints its `point_
 For a quick terminal lookup without opening Rerun, add `--inspect-lookup-only`:
 
 ```bash
-pixi run -e rerun-viewer rerun-viewer "--exp_yaml=arguments/exp_test.yaml --inspect-image=8315199.jpg --inspect-pixel 137.3 485.8 --inspect-source-session=ssk17 --inspect-lookup-only"
+pixi run -e rerun-viewer rerun-viewer "--exp_yaml=arguments/exp_test_ours.yaml --inspect-image=8315199.jpg --inspect-pixel 137.3 485.8 --inspect-source-session=ssk17 --inspect-lookup-only"
 ```
 
 To write an `.rrd` file instead of spawning the viewer:
 
 ```bash
-pixi run -e rerun-viewer rerun-viewer "--exp_yaml=arguments/exp_test.yaml --output=outputs/session_view.rrd"
+pixi run -e rerun-viewer rerun-viewer "--exp_yaml=arguments/exp_test_ours.yaml --output=outputs/session_view.rrd"
 ```
 
 To provide splats from another pipeline such as Nerfstudio, pass them explicitly with `--splat-asset`, or point the viewer at a directory with `--splat-dir`:
 
 ```bash
-pixi run -e rerun-viewer rerun-viewer "--exp_yaml=arguments/exp_test.yaml --show-splats --splat-asset=/path/to/splat.ply"
+pixi run -e rerun-viewer rerun-viewer "--exp_yaml=arguments/exp_test_ours.yaml --show-splats --splat-asset=/path/to/splat.ply"
 ```
 
 To also log full point-track documents, optionally with duplicated support images, use an explicit cap:
 
 ```bash
-pixi run -e rerun-viewer rerun-viewer "--exp_yaml=arguments/exp_test.yaml --max-track-docs=50 --log-track-images"
+pixi run -e rerun-viewer rerun-viewer "--exp_yaml=arguments/exp_test_ours.yaml --max-track-docs=50 --log-track-images"
 ```
 
 ## Evaluation
 
-Populate your own csv files with image pairs for evaluation, following the format provided.
+* **find_annotation_image_pairs.py:** Reads a distance matrix and the corresponding image list (rgb.csv), then automatically selects a spatially distributed set of cross-session image pairs with low visual distance. Outputs evaluation_points_*.csv files for each year-combination (e.g. 2016-2018, 2016-2020, 2016-2020), which are used for manual keypoint annotation during reprojection evaluation.
 * **select_eval_points.py:** The script will show the image pairs and clickable keypoints on the query image. User-clicked keypoints are projected onto the database image, where users can click on a projected point to move and correct its position. Must be run under the *lightglue* environment.
 * **project_eval_points.py:** Iterates over the image pairs in the csv file and projects query keypoints onto the database image. Projections are compared against uv_groundtruth (in the csv files) and reprojection error is measured. Must be run under the *lightglue* environment. A *.npy* file is produced for each csv file, corresponding to a session combination.
 * **compute_rpe_from_projected_points.py:** Concatenates reprojection errors from each session combination into one *.npy* file. Also computes the mean and median rpe.
