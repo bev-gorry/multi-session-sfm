@@ -105,7 +105,7 @@ def show_image_with_clickable_points(img_path, img_colmap):
     return results
 
 
-def project_colmap_point(xyz_world, image, camera):
+def project_colmap_point(xyz_world, image, camera):    
     R = image.qvec2rotmat()
     t = image.tvec.reshape(3, 1)
 
@@ -172,61 +172,75 @@ def project_colmap_point(xyz_world, image, camera):
     v = fy * Y / Z + cy
     return u, v
 
-def plot_kpts_on_image_pair(image0, image1, uv_clicked, uv_gt=None, uv_proj=None):
+def get_observation_in_image(pid, points3D, image):
+    """If 3D point `pid` has a COLMAP track observation in `image`,
+    return its observed 2D keypoint (u, v); otherwise None."""
+    point3D = points3D[pid]
+    for image_id, point2D_idx in zip(point3D.image_ids, point3D.point2D_idxs):
+        if image_id == image.id:
+            return image.xys[point2D_idx]
+    return None
+
+def get_pair_colors(n):
+    cmap = plt.get_cmap("tab20")      # 20 distinct colours
+    return [cmap(i % cmap.N) for i in range(n)]
+
+def plot_kpts_on_image_pair(image0, image1, uv_clicked, uv_gt=None, uv_proj=None, colors=None):
     fig, axs = plt.subplots(1, 2, figsize=(14, 6))
 
-    axs[0].imshow(image0)
-    axs[0].axis('off')
+    n = 0
     if uv_clicked is not None:
-        axs[0].scatter(
-            [u for u, v in uv_clicked],
-            [v for u, v in uv_clicked],
-            color=yellow, s=150, edgecolors='white'
-        )
-    axs[1].imshow(image1)
-    axs[1].axis('off')
-    
-    # if uv_gt is not None and uv_proj is not None:
-    #     if len(uv_gt) != len(uv_proj):
-    #         return fig, axs
-
-
-    #     for (u_gt, v_gt), (u_pr, v_pr) in zip(uv_gt, uv_proj):
-    #         axs[1].plot(
-    #         [u_gt, u_pr],
-    #         [v_gt, v_pr],
-    #         color=red,
-    #         linewidth=3,
-    #         alpha=1.0,
-    #         zorder=1,
-    #         )
-    #         # axs[1].arrow(
-    #         # u_gt, v_gt,
-    #         # u_pr - u_gt, v_pr - v_gt,
-    #         # color=red,
-    #         # width=0.5,
-    #         # head_width=6,
-    #         # alpha=0.8,
-    #         # length_includes_head=True
-    #         # )
-    
+        n = max(n, len(uv_clicked))
     if uv_gt is not None:
-        axs[1].scatter(
-            [u for u, v in uv_gt],
-            [v for u, v in uv_gt],
-            zorder=4,
-            color=yellow, s=150, edgecolors='white'
-        )
+        n = max(n, len(uv_gt))
     if uv_proj is not None:
-        axs[1].scatter(
-            [u for u, v in uv_proj],
-            [v for u, v in uv_proj],
-            zorder=4,
-            color=blue, s=150, marker='X', linewidths=1, edgecolors='white',
-        )
-        
+        n = max(n, len(uv_proj))
 
-    # plt.show()
+    if colors is None:
+        colors = get_pair_colors(n)
+
+    # ---------------- Image 0 ----------------
+    axs[0].imshow(image0)
+    axs[0].axis("off")
+
+    if uv_clicked is not None:
+        for (u, v), c in zip(uv_clicked, colors):
+            axs[0].scatter(
+                u, v,
+                color=c,
+                s=150,
+                edgecolors="white",
+                linewidths=1.5,
+                zorder=5,
+            )
+
+    # ---------------- Image 1 ----------------
+    axs[1].imshow(image1)
+    axs[1].axis("off")
+
+    if uv_gt is not None:
+        for (u, v), c in zip(uv_gt, colors):
+            axs[1].scatter(
+                u, v,
+                color=c,
+                s=150,
+                edgecolors="white",
+                linewidths=1.5,
+                zorder=5,
+            )
+
+    if uv_proj is not None:
+        for (u, v), c in zip(uv_proj, colors):
+            axs[1].scatter(
+                u, v,
+                color=c,
+                marker="X",
+                s=170,
+                edgecolors="white",
+                linewidths=1.5,
+                zorder=6,
+            )
+
     return fig, axs
 
 def plot_rpe_hist(errors, color, label=''):

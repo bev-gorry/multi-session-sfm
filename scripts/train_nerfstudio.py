@@ -13,7 +13,7 @@ from experiment import load_exp_yaml, resolve_repo_path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 NERFSTUDIO_MANIFEST = REPO_ROOT / "baselines" / "nerfstudio" / "pixi.toml"
-VSLAM_EVAL_ROOT = REPO_ROOT / "baselines" / "VSLAM-LAB-Evaluation"
+VSLAM_EVAL_ROOT = Path('/media/beverley/beverley_t7/VSLAM-LAB-Evaluation') # REPO_ROOT / "baselines" / "VSLAM-LAB-Evaluation"
 
 
 def load_exp(exp_yaml: Path) -> dict:
@@ -91,6 +91,7 @@ def main() -> None:
         print(" ".join(command))
         return
 
+    print(f"\033[93mREMINDER: Check that the VSLAM-LAB evaluation output is correct at {VSLAM_EVAL_ROOT}\nCorrect the path in scripts/train_nerfstudio.py\033[0m")
     subprocess.run(command, cwd=REPO_ROOT / "baselines" / "nerfstudio", check=True)
 
 
