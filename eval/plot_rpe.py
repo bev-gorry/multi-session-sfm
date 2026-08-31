@@ -14,7 +14,7 @@ root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 sys.path.append(root)
 
 from utilities import parse_yaml, plot_rpe_hist
-from constants import plotting_parameters, EVAL_POINTS_DIR#, OVERLEAF_PATH
+from constants import plotting_parameters, EVAL_POINTS_DIR, OVERLEAF_PATH
 
 plt.rcParams.update({
     "text.usetex": True,
@@ -83,6 +83,7 @@ if __name__ == "__main__":
     ]
 
     histogram_path = input_path / f"{dataset.lower()}_{subset}_reprojection_error.png"
+    # overleaf_path = OVERLEAF_PATH / f"{subset}_reprojection_error.pdf"
 
     # Load only existing error files
     labels = []
@@ -141,7 +142,7 @@ if __name__ == "__main__":
         axins.axvline(np.median(rpe), color=color, linestyle="--", linewidth=1)
 
     # Zoom limits (tune if needed)
-    zoom_max = np.percentile(np.concatenate(rpe_list), 85)
+    zoom_max = np.percentile(np.concatenate(rpe_list), 85) # this is the amount of "zoom" in the inset plot
     axins.set_xlim(0.0, zoom_max)
     axins.set_ylim(0, None)
 
