@@ -11,6 +11,7 @@ vslamlab = { features = ["pipeline", "vslamlab"], no-default-feature = true }
 vprlab = { features = ["pipeline", "vprlab"], no-default-feature = true }
 lightglue = { features = ["pipeline", "lightglue"], no-default-feature = true }
 rerun-viewer = { features = ["rerun-viewer"], no-default-feature = true }
+annotate = { features = ["annotate"], no-default-feature = true }
 
 ##### Full pipeline #####
 [feature.pipeline]
@@ -60,6 +61,7 @@ matplotlib = "*"
 pandas = "*"
 py-opencv = "*"
 scipy = "*"
+h5py = "*"
 requests = "*"
 inputimeout = "*"
 scikit-learn = "*"
@@ -81,6 +83,11 @@ utm = "*"
 viser = "*"
 open3d = "*"
 gdown = "*"
+yt-dlp = ">=2026.8.19"  # older releases 403 on YouTube (dead ANDROID_VR client); new ones need a JS runtime
+yt-dlp-ejs = "*"        # yt-dlp's JS challenge solver scripts
+deno = "*"              # JS runtime yt-dlp uses to solve YouTube's n/sig challenges
+cryptography = "*"
+openpyxl = "*"
 
 
 ##### VPR-LAB #####
@@ -163,3 +170,19 @@ py-opencv = "*"
 pyyaml = "*"
 rerun-sdk = ">=0.33,<0.34"
 tqdm = "*"
+
+##### Annotation (re-clicking for the annotator study; torch-free, also on macOS) #####
+[feature.annotate]
+channels = ["https://prefix.dev/conda-forge"]
+platforms = ["linux-64", "osx-arm64"]
+
+[feature.annotate.tasks]
+reclick.cmd = "python eval/reclick_eval_points.py {{ args }}"
+reclick.args = [{ "arg" = "args", "default" = "--help" }]
+
+[feature.annotate.dependencies]
+python = ">=3.11,<3.13"
+numpy = "*"
+pandas = "*"
+matplotlib = "*"
+py-opencv = "*"

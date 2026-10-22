@@ -16,8 +16,8 @@ import matplotlib.pyplot as plt
 root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 sys.path.append(root)
 
-from baselines.VSLAM_LAB.Baselines.LightGlue.lightglue import LightGlue, SuperPoint, SIFT
-from baselines.VSLAM_LAB.Baselines.LightGlue.lightglue.utils import load_image, rbd
+from lightglue import LightGlue, SuperPoint, SIFT  # baselines/LightGlue, installed editable in the lightglue env
+from lightglue.utils import load_image, rbd
 from experiment import load_exp_yaml
 
 BLUE = [106, 178, 212]
