@@ -177,8 +177,7 @@ channels = ["https://prefix.dev/conda-forge"]
 platforms = ["linux-64", "osx-arm64"]
 
 [feature.annotate.tasks]
-reclick.cmd = "python eval/reclick_eval_points.py {{ args }}"
-reclick.args = [{ "arg" = "args", "default" = "--help" }]
+reclick.cmd = "python eval/reclick_eval_points.py"
 
 [feature.annotate.dependencies]
 python = ">=3.11,<3.13"
