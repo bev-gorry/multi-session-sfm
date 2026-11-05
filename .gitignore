@@ -36,5 +36,9 @@ ENV/
 # project outputs
 outputs/
 baselines/
-reprojection/
 arguments/
+
+reviews/*
+!reviews/port_tests/
+reviews/port_tests/__pycache__/
+reprojection/**/results/
